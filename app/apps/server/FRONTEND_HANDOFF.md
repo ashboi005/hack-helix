@@ -641,7 +641,7 @@ This means:
 
 3. Backend returns the external response body directly to the frontend.
 4. Frontend passes the returned token payload into the eye-tracker SDK or backend integration.
-4. All gaze data handling, scroll correlation, cursor telemetry, and ADHD state classification remain on the frontend.
+5. All gaze data handling, scroll correlation, cursor telemetry, and ADHD state classification remain on the frontend.
 
 ## Unified Error Shape
 
@@ -662,7 +662,7 @@ All backend-controlled errors use this JSON format:
 - `404` resource not found or not owned by the current user
 - `409` precondition issue such as `knowledge_base_not_ready`
 - `502` upstream AI or AutoSage failure
-- `503` eye backend unavailable
+- `503` gaze backend unavailable
 
 ## Common Error Examples
 
@@ -685,7 +685,7 @@ All backend-controlled errors use this JSON format:
 }
 ```
 
-### Eye backend unavailable
+### Gaze backend unavailable
 
 ```json
 {
