@@ -115,6 +115,9 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   const captureProgressRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const livePreviewSocketRef = useRef<WebSocket | null>(null)
   const livePreviewActiveRef = useRef(false)
+  const livePreviewSendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const livePreviewPingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const latestLivePreviewResultRef = useRef<GazeVectorReturn | null>(null)
   const calibrationRecordRef = useRef<TestCalibrationRecord | null>(savedCalibrationRecord)
   const calibrationViewportRef = useRef(calibrationViewport)
   const onLivePreviewPointRef = useRef(options.onLivePreviewPoint)
@@ -183,6 +186,47 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
       closePreview()
     }
   }, [])
+
+  useEffect(() => {
+    if (livePreviewSendIntervalRef.current) {
+      clearInterval(livePreviewSendIntervalRef.current)
+      livePreviewSendIntervalRef.current = null
+    }
+
+    if (!livePreviewActive || livePreviewStatus !== "connected") return
+
+    livePreviewSendIntervalRef.current = setInterval(() => {
+      sendLivePreviewGaze()
+    }, 50)
+
+    return () => {
+      if (livePreviewSendIntervalRef.current) {
+        clearInterval(livePreviewSendIntervalRef.current)
+        livePreviewSendIntervalRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePreviewActive, livePreviewStatus])
+
+  useEffect(() => {
+    if (livePreviewPingIntervalRef.current) {
+      clearInterval(livePreviewPingIntervalRef.current)
+      livePreviewPingIntervalRef.current = null
+    }
+
+    if (!livePreviewActive || livePreviewStatus !== "connected") return
+
+    livePreviewPingIntervalRef.current = setInterval(() => {
+      sendLivePreviewPing()
+    }, 10000)
+
+    return () => {
+      if (livePreviewPingIntervalRef.current) {
+        clearInterval(livePreviewPingIntervalRef.current)
+        livePreviewPingIntervalRef.current = null
+      }
+    }
+  }, [livePreviewActive, livePreviewStatus])
 
   useEffect(() => {
     if (!calibrating) return
@@ -353,6 +397,17 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     livePreviewSocketRef.current = null
   }
 
+  function clearLivePreviewIntervals() {
+    if (livePreviewSendIntervalRef.current) {
+      clearInterval(livePreviewSendIntervalRef.current)
+      livePreviewSendIntervalRef.current = null
+    }
+    if (livePreviewPingIntervalRef.current) {
+      clearInterval(livePreviewPingIntervalRef.current)
+      livePreviewPingIntervalRef.current = null
+    }
+  }
+
   function parseLivePreviewPoint(payload: unknown): LivePreviewPoint | null {
     if (!payload || typeof payload !== "object") return null
     const record = payload as Record<string, unknown>
@@ -386,8 +441,9 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     return { x: xRaw, y: yRaw, timestamp: Date.now() }
   }
 
-  function sendLivePreviewGaze(result: GazeVectorReturn) {
+  function sendLivePreviewGaze(result: GazeVectorReturn | null = latestLivePreviewResultRef.current) {
     if (!livePreviewActiveRef.current) return
+    if (!result) return
     const socket = livePreviewSocketRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) return
     if (!calibrationRecordRef.current?.calibration) return
@@ -400,9 +456,22 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     }))
   }
 
+  function sendLivePreviewPing() {
+    if (!livePreviewActiveRef.current) return
+    const socket = livePreviewSocketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) return
+
+    socket.send(JSON.stringify({
+      type: "ping",
+      timestamp: Date.now(),
+    }))
+  }
+
   function stopLivePreview() {
+    clearLivePreviewIntervals()
     closeLivePreviewSocket()
     livePreviewActiveRef.current = false
+    latestLivePreviewResultRef.current = null
     setLivePreviewActive(false)
     setLivePreviewStatus("idle")
     setLivePreviewError("")
@@ -411,15 +480,17 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   }
 
   async function startLivePreview() {
+    const calibrationRecord = calibrationRecordRef.current ?? calibrationResult.record
+
     if (!hasLivePreviewRequirements()) {
       setLivePreviewError("Live preview requires a websocket route and a valid access token or API key configuration.")
       return
     }
-    if (!calibrationResult.record?.calibration) {
+    if (!calibrationRecord?.calibration) {
       setLivePreviewError("Run the 9-point calibration before live preview.")
       return
     }
-    if (!calibrationResult.record.gyroZeroSnapshot) {
+    if (!calibrationRecord.gyroZeroSnapshot) {
       setLivePreviewError("Capture the gyro zero snapshot before starting live preview.")
       return
     }
@@ -460,8 +531,8 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
       setLivePreviewStatus("connected")
       socket.send(JSON.stringify({
         type: "session.init",
-        calibration: calibrationResult.record.calibration,
-        gyroZeroSnapshot: calibrationResult.record.gyroZeroSnapshot,
+        calibration: calibrationRecord.calibration,
+        gyroZeroSnapshot: calibrationRecord.gyroZeroSnapshot,
       }))
 
       socket.onmessage = (event: MessageEvent<string>) => {
@@ -472,6 +543,9 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
             if (record.type === "error") {
               setLivePreviewStatus("error")
               setLivePreviewError(String(record.detail ?? "Live preview websocket error."))
+              return
+            }
+            if (record.type === "pong") {
               return
             }
           }
@@ -498,6 +572,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
         }
       }
     } catch (error) {
+      livePreviewActiveRef.current = false
       setLivePreviewActive(false)
       setLivePreviewStatus("error")
       setLivePreviewError(error instanceof Error ? error.message : "Failed to open live preview websocket.")
@@ -616,6 +691,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
           roi: result.roi,
           frameSize: null,
         }
+        latestLivePreviewResultRef.current = result
         setLatestResult(result)
         options.onLiveResult?.(result)
         sendLivePreviewGaze(result)

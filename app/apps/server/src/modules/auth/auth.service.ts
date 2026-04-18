@@ -56,12 +56,42 @@ function getErrorCode(error: unknown): string | undefined {
   return undefined;
 }
 
+function getErrorMessage(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const directMessage = Reflect.get(error, "message");
+  if (typeof directMessage === "string") {
+    return directMessage;
+  }
+
+  const body = Reflect.get(error, "body");
+  if (typeof body === "object" && body !== null) {
+    const bodyMessage = Reflect.get(body, "message");
+    if (typeof bodyMessage === "string") {
+      return bodyMessage;
+    }
+  }
+
+  return undefined;
+}
+
 function normalizeSignUpError(error: unknown): ApiError {
   const status = getErrorStatus(error);
   const code = getErrorCode(error);
+  const message = getErrorMessage(error)?.toLowerCase();
 
-  if (status === 409 || code?.includes("USER_ALREADY_EXISTS")) {
+  if (
+    status === 409
+    || code?.includes("USER_ALREADY_EXISTS")
+    || message?.includes("already exists")
+  ) {
     return new ApiError(409, "email_already_in_use", "EMAIL_ALREADY_IN_USE");
+  }
+
+  if (code?.includes("INVALID_ORIGIN") || message?.includes("origin")) {
+    return new ApiError(403, "invalid_origin", "INVALID_ORIGIN");
   }
 
   return new ApiError(status ?? 400, "signup_failed", "SIGNUP_FAILED");
