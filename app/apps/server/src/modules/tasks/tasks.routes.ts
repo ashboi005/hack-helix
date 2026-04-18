@@ -1,69 +1,104 @@
-import { Elysia } from "elysia";
-import { z } from "zod";
+import { Elysia, t } from "elysia";
 
 import { authContextPlugin } from "@/modules/auth/auth.service";
-import { taskPriorityValues, taskStatusValues } from "@/db/schema";
 import { ApiError } from "@/utils/api-error";
 import { tomorrowAtNineUtc } from "@/utils/dates";
 
 import { generateShutdownMessage, getDriftSuggestion, getSmartTaskSuggestion } from "./tasks.ai.service";
 import { tasksService } from "./tasks.service";
 
-const uuidSchema = z.string().uuid();
-
-const projectBody = z.object({
-  title: z.string().min(1),
+const projectSchema = t.Object({
+  id: t.String({ format: "uuid" }),
+  userId: t.String({ format: "uuid" }),
+  title: t.String(),
+  createdAt: t.Date(),
 });
 
-const projectParams = z.object({
+const taskSchema = t.Object({
+  id: t.String({ format: "uuid" }),
+  projectId: t.String({ format: "uuid" }),
+  userId: t.String({ format: "uuid" }),
+  title: t.String(),
+  description: t.Union([t.String(), t.Null()]),
+  status: t.Union([t.Literal("todo"), t.Literal("in_progress"), t.Literal("done")]),
+  priority: t.Union([t.Literal("low"), t.Literal("medium"), t.Literal("high")]),
+  dueDate: t.Union([t.Date(), t.Null()]),
+  completedAt: t.Union([t.Date(), t.Null()]),
+  createdAt: t.Date(),
+});
+
+const uuidSchema = t.String({ format: "uuid" });
+
+const projectBody = t.Object({
+  title: t.String({ minLength: 1 }),
+});
+
+const projectParams = t.Object({
   id: uuidSchema,
 });
 
-const projectTaskParams = z.object({
+const projectTaskParams = t.Object({
   projectId: uuidSchema,
 });
 
-const taskParams = z.object({
+const taskParams = t.Object({
   id: uuidSchema,
 });
 
-const taskCreateBody = z.object({
-  title: z.string().min(1),
-  description: z.string().min(1).optional(),
-  priority: z.enum(taskPriorityValues).optional(),
-  dueDate: z.string().min(1).optional(),
+const taskCreateBody = t.Object({
+  title: t.String({ minLength: 1 }),
+  description: t.Optional(t.String({ minLength: 1 })),
+  priority: t.Optional(t.Union([t.Literal("low"), t.Literal("medium"), t.Literal("high")])),
+  dueDate: t.Optional(t.String({ format: "date-time" })),
 });
 
-const taskListQuery = z.object({
-  status: z.enum(taskStatusValues).optional(),
-  priority: z.enum(taskPriorityValues).optional(),
+const taskListQuery = t.Object({
+  status: t.Optional(t.Union([t.Literal("todo"), t.Literal("in_progress"), t.Literal("done")])),
+  priority: t.Optional(t.Union([t.Literal("low"), t.Literal("medium"), t.Literal("high")])),
 });
 
-const taskUpdateBody = z.object({
-  title: z.string().min(1).optional(),
-  description: z.string().min(1).optional(),
-  status: z.enum(taskStatusValues).optional(),
-  priority: z.enum(taskPriorityValues).optional(),
-  dueDate: z.string().min(1).optional(),
+const taskUpdateBody = t.Object({
+  title: t.Optional(t.String({ minLength: 1 })),
+  description: t.Optional(t.String({ minLength: 1 })),
+  status: t.Optional(t.Union([t.Literal("todo"), t.Literal("in_progress"), t.Literal("done")])),
+  priority: t.Optional(t.Union([t.Literal("low"), t.Literal("medium"), t.Literal("high")])),
+  dueDate: t.Optional(t.String({ format: "date-time" })),
 });
 
-const smartCreateBody = z.object({
+const smartCreateBody = t.Object({
   projectId: uuidSchema,
-  title: z.string().min(1),
-  description: z.string().min(1).optional(),
-  adhdState: z.enum(["DRIFTING", "FATIGUED"]),
+  title: t.String({ minLength: 1 }),
+  description: t.Optional(t.String({ minLength: 1 })),
+  adhdState: t.Union([t.Literal("DRIFTING"), t.Literal("FATIGUED")]),
 });
 
-const rescheduleBody = z.object({
-  adhdState: z.literal("FATIGUED"),
+const rescheduleBody = t.Object({
+  adhdState: t.Literal("FATIGUED"),
 });
 
-const shutdownBody = z.object({
-  adhdState: z.string().min(1),
+const shutdownBody = t.Object({
+  adhdState: t.String({ minLength: 1 }),
 });
 
-const driftBody = z.object({
-  adhdState: z.literal("DRIFTING"),
+const driftBody = t.Object({
+  adhdState: t.Literal("DRIFTING"),
+});
+
+const rescheduleResponse = t.Object({
+  rescheduledCount: t.Number(),
+  tasks: t.Array(taskSchema),
+});
+
+const shutdownResponse = t.Object({
+  completedToday: t.Array(taskSchema),
+  pendingCount: t.Number(),
+  dueTomorrow: t.Array(taskSchema),
+  message: t.String(),
+});
+
+const driftSuggestResponse = t.Object({
+  suggestedTask: taskSchema,
+  reason: t.String(),
 });
 
 function parseDate(value: string | undefined): Date | undefined {
@@ -93,6 +128,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       body: projectBody,
+      response: projectSchema,
       detail: {
         summary: "Create a project",
       },
@@ -103,6 +139,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     ({ currentUser }) => tasksService.listProjects(currentUser.id),
     {
       auth: true,
+      response: t.Array(projectSchema),
       detail: {
         summary: "List projects",
       },
@@ -114,7 +151,8 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       params: projectParams,
-      body: projectBody.partial(),
+      body: t.Partial(projectBody),
+      response: projectSchema,
       detail: {
         summary: "Update a project",
       },
@@ -130,6 +168,9 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       params: projectParams,
+      response: {
+        204: t.Null(),
+      },
       detail: {
         summary: "Delete a project and its tasks",
       },
@@ -148,6 +189,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
       auth: true,
       params: projectTaskParams,
       body: taskCreateBody,
+      response: taskSchema,
       detail: {
         summary: "Create a task in a project",
       },
@@ -160,6 +202,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
       auth: true,
       params: projectTaskParams,
       query: taskListQuery,
+      response: t.Array(taskSchema),
       detail: {
         summary: "List tasks for a project",
       },
@@ -180,6 +223,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       body: smartCreateBody,
+      response: taskSchema,
       detail: {
         summary: "AI-assisted task creation for drifting or fatigued states",
       },
@@ -212,6 +256,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       body: rescheduleBody,
+      response: rescheduleResponse,
       detail: {
         summary: "Reschedule overdue tasks to tomorrow morning when the user is fatigued",
       },
@@ -237,6 +282,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       body: shutdownBody,
+      response: shutdownResponse,
       detail: {
         summary: "Generate a shutdown summary for the current task state",
       },
@@ -267,6 +313,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       body: driftBody,
+      response: driftSuggestResponse,
       detail: {
         summary: "Suggest a single re-entry task when the user is drifting",
       },
@@ -278,6 +325,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       params: taskParams,
+      response: taskSchema,
       detail: {
         summary: "Get a single task",
       },
@@ -297,6 +345,7 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
       auth: true,
       params: taskParams,
       body: taskUpdateBody,
+      response: taskSchema,
       detail: {
         summary: "Update a task",
       },
@@ -312,6 +361,9 @@ export const tasksRoutes = new Elysia({ tags: ["Tasks"] })
     {
       auth: true,
       params: taskParams,
+      response: {
+        204: t.Null(),
+      },
       detail: {
         summary: "Delete a task",
       },

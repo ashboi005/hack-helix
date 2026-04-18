@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 
 import { authContextPlugin } from "@/modules/auth/auth.service";
 import { env } from "@/utils/env";
@@ -44,6 +44,13 @@ export const eyeRoutes = new Elysia({ prefix: "/eye", tags: ["Eye"] })
     },
     {
       auth: true,
+      response: {
+        200: t.Any(),
+        503: t.Object({
+          error: t.Literal("gaze_backend_unavailable"),
+          code: t.Literal("GAZE_BACKEND_UNAVAILABLE"),
+        }),
+      },
       detail: {
         summary: "Proxy token creation for the external gaze tracking backend",
       },
