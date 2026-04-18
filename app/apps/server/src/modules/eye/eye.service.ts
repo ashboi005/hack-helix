@@ -17,14 +17,16 @@ function getTokenPayload(payload: unknown): { token: string; expiresIn: number }
 }
 
 export async function createEyeSessionToken(userId: string, sessionId: string): Promise<{ token: string; expiresIn: number }> {
-  const response = await fetch(new URL("/api/sessions", env.EYE_BACKEND_URL), {
+  const response = await fetch(new URL("/api/gaze/token", env.GAZE_BASE_URL), {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.EYE_BACKEND_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      userId,
+      apiKey: env.GAZE_API_KEY,
+      metadata: {
+        uuid: userId,
+      },
       sessionId,
     }),
   });

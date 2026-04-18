@@ -1,5 +1,4 @@
-import { Elysia } from "elysia";
-import { z } from "zod";
+import { Elysia, t } from "elysia";
 
 import { authContextPlugin } from "@/modules/auth/auth.service";
 import { documentsService } from "@/modules/documents/documents.service";
@@ -9,35 +8,43 @@ import { fastQuery } from "./autosage.service";
 import { classifyDistraction } from "./distraction.service";
 import { extractTextFromRegion } from "./ocr.service";
 
-const documentId = z.string().uuid();
+const summariseBody = t.Union([
+  t.Object({
+    docId: t.String({ format: "uuid" }),
+    scope: t.Literal("full"),
+  }),
+  t.Object({
+    docId: t.String({ format: "uuid" }),
+    scope: t.Literal("partial"),
+    pageNumbers: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+  }),
+]);
 
-const summariseBody = z
-  .object({
-    docId: documentId,
-    scope: z.enum(["full", "partial"]),
-    pageNumbers: z.array(z.number().int().positive()).min(1).optional(),
-  })
-  .superRefine((value, context) => {
-    if (value.scope === "partial" && (!value.pageNumbers || value.pageNumbers.length === 0)) {
-      context.addIssue({
-        code: "custom",
-        message: "pageNumbers is required when scope is partial",
-        path: ["pageNumbers"],
-      });
-    }
-  });
-
-const explainRereadBody = z.object({
-  docId: documentId,
-  pageNumber: z.number().int().positive(),
-  regionBase64: z.string().min(1),
+const explainRereadBody = t.Object({
+  docId: t.String({ format: "uuid" }),
+  pageNumber: t.Number({ minimum: 1 }),
+  regionBase64: t.String({ minLength: 1 }),
 });
 
-const checkDistractionBody = z.object({
-  docId: documentId,
-  fullPageBase64: z.string().min(1),
-  regionImages: z.array(z.string().min(1)).min(2).max(4),
-  pageNumbers: z.array(z.number().int().positive()).min(1),
+const checkDistractionBody = t.Object({
+  docId: t.String({ format: "uuid" }),
+  fullPageBase64: t.String({ minLength: 1 }),
+  regionImages: t.Array(t.String({ minLength: 1 }), { minItems: 2, maxItems: 4 }),
+  pageNumbers: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+});
+
+const summariseResponse = t.Object({
+  summary: t.String(),
+});
+
+const explainResponse = t.Object({
+  explanation: t.String(),
+});
+
+const distractionResponse = t.Object({
+  genuine: t.Boolean(),
+  reason: t.String(),
+  pageNumbers: t.Array(t.Number()),
 });
 
 function requireKnowledgeBase(kbId: string | null): string {
@@ -74,6 +81,7 @@ export const assistanceRoutes = new Elysia({ prefix: "/assistance", tags: ["Assi
     {
       auth: true,
       body: summariseBody,
+      response: summariseResponse,
       detail: {
         summary: "Summarise a whole document or a subset of pages",
       },
@@ -101,6 +109,7 @@ export const assistanceRoutes = new Elysia({ prefix: "/assistance", tags: ["Assi
     {
       auth: true,
       body: explainRereadBody,
+      response: explainResponse,
       detail: {
         summary: "Explain text from a re-read document region",
       },
@@ -121,6 +130,7 @@ export const assistanceRoutes = new Elysia({ prefix: "/assistance", tags: ["Assi
     {
       auth: true,
       body: checkDistractionBody,
+      response: distractionResponse,
       detail: {
         summary: "Classify whether repeated gaze regions are genuine visual references or distraction",
       },
