@@ -18,6 +18,45 @@ const authSchema = {
   verification: verifications,
 };
 
+function toOrigin(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+function buildTrustedOrigins() {
+  const trustedOrigins = new Set<string>();
+
+  trustedOrigins.add("app://");
+  trustedOrigins.add(env.CORS_ORIGIN);
+
+  const betterAuthOrigin = toOrigin(env.BETTER_AUTH_URL);
+  if (betterAuthOrigin) {
+    trustedOrigins.add(betterAuthOrigin);
+  }
+
+  if (env.NODE_ENV === "development") {
+    [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002",
+      "http://localhost:5173",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:3001",
+      "http://127.0.0.1:3002",
+      "http://127.0.0.1:5173",
+      "http://localhost:8081",
+      "exp://",
+      "exp://**",
+      "exp://192.168.*.*:*/**",
+    ].forEach((origin) => trustedOrigins.add(origin));
+  }
+
+  return Array.from(trustedOrigins);
+}
+
 export function createAuth() {
   const db = createDb();
 
@@ -45,13 +84,7 @@ export function createAuth() {
     verification: {
       modelName: "verifications",
     },
-    trustedOrigins: [
-      env.CORS_ORIGIN,
-      "app://",
-      ...(env.NODE_ENV === "development"
-        ? ["exp://", "exp://**", "exp://192.168.*.*:*/**", "http://localhost:8081"]
-        : []),
-    ],
+    trustedOrigins: buildTrustedOrigins(),
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,
