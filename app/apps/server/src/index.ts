@@ -1,35 +1,98 @@
-import { auth } from "@app/auth";
-import { env } from "@app/env/server";
+import { authRoutes } from "@/modules/auth/auth.routes";
+import { authHandlerPlugin } from "@/modules/auth/auth.service";
+import { assistanceRoutes } from "@/modules/assistance/assistance.routes";
+import { documentRoutes } from "@/modules/documents/documents.routes";
+import { eyeRoutes } from "@/modules/eye/eye.routes";
+import { tasksRoutes } from "@/modules/tasks/tasks.routes";
+import { isApiError } from "@/utils/api-error";
+import { env } from "@/utils/env";
 import { cors } from "@elysiajs/cors";
 import { openapi } from "@elysiajs/openapi";
 import { swagger } from "@elysiajs/swagger";
 import { Elysia } from "elysia";
 
-const app = new Elysia()
+function getValidationDetails(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const all = Reflect.get(error, "all");
+  if (Array.isArray(all)) {
+    return all;
+  }
+
+  const summary = Reflect.get(error, "message");
+  return typeof summary === "string" ? summary : undefined;
+}
+
+const app = new Elysia({ name: "focuslayer.api" })
   .use(
     cors({
       origin: env.CORS_ORIGIN,
-      methods: ["GET", "POST", "OPTIONS"],
+      methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"],
       credentials: true,
     }),
   )
   .use(
     openapi({
-      info: { title: "HackHelix API", version: "1.0.0" },
+      documentation: {
+        info: { title: "FocusLayer API", version: "1.0.0" },
+      },
     }),
   )
   .use(
     swagger({ path: "/docs" }),
   )
-  .all("/api/auth/*", async (context) => {
-    const { request, status } = context;
-    if (["POST", "GET"].includes(request.method)) {
-      return auth.handler(request);
+  .use(authHandlerPlugin)
+  .use(authRoutes)
+  .use(documentRoutes)
+  .use(assistanceRoutes)
+  .use(tasksRoutes)
+  .use(eyeRoutes)
+  .get("/", () => ({
+    name: "FocusLayer API",
+    status: "ok",
+  }))
+  .onError(({ code, error, set }) => {
+    if (isApiError(error)) {
+      set.status = error.status;
+
+      return {
+        error: error.error,
+        code: error.code,
+        ...(typeof error.details === "undefined" ? {} : { details: error.details }),
+      };
     }
-    return status(405);
-  })
-  .get("/", () => "Cracked Nerds for the winnnnnn RAHHHHH")
-  .listen(3000, () => {
-    console.log("Server is running on http://localhost:3000");
+
+    if (code === "VALIDATION") {
+      set.status = 400;
+
+      return {
+        error: "validation_error",
+        code: "VALIDATION_ERROR",
+        details: getValidationDetails(error),
+      };
+    }
+
+    if (code === "NOT_FOUND") {
+      set.status = 404;
+
+      return {
+        error: "not_found",
+        code: "NOT_FOUND",
+      };
+    }
+
+    console.error(error);
+    set.status = 500;
+
+    return {
+      error: "internal_server_error",
+      code: "INTERNAL_SERVER_ERROR",
+    };
   });
+
+app.listen(env.PORT);
+
+console.log(`FocusLayer API is running on http://localhost:${env.PORT}`);

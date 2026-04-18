@@ -1,0 +1,1 @@
+export { db } from "@app/db";

@@ -1,9 +1,22 @@
 import { createDb } from "@app/db";
-import * as schema from "@app/db/schema/auth";
+import {
+  accounts,
+  sessions,
+  users,
+  verifications,
+} from "@app/db/schema/index";
 import { env } from "@app/env/server";
 import { expo } from "@better-auth/expo";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { bearer } from "better-auth/plugins";
+
+const authSchema = {
+  user: users,
+  session: sessions,
+  account: accounts,
+  verification: verifications,
+};
 
 export function createAuth() {
   const db = createDb();
@@ -11,9 +24,27 @@ export function createAuth() {
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
-
-      schema: schema,
+      schema: authSchema,
     }),
+    user: {
+      modelName: "users",
+      additionalFields: {
+        kbId: {
+          type: "string",
+          required: false,
+          input: false,
+        },
+      },
+    },
+    account: {
+      modelName: "accounts",
+    },
+    session: {
+      modelName: "sessions",
+    },
+    verification: {
+      modelName: "verifications",
+    },
     trustedOrigins: [
       env.CORS_ORIGIN,
       "app://",
@@ -23,17 +54,21 @@ export function createAuth() {
     ],
     emailAndPassword: {
       enabled: true,
+      autoSignIn: true,
     },
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     advanced: {
+      database: {
+        generateId: "uuid",
+      },
       defaultCookieAttributes: {
-        sameSite: "none",
-        secure: true,
+        sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+        secure: env.NODE_ENV === "production",
         httpOnly: true,
       },
     },
-    plugins: [expo()],
+    plugins: [expo(), bearer()],
   });
 }
 

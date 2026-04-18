@@ -10,6 +10,7 @@
     "start": "bun run dist/index.mjs"
   },
   "dependencies": {
+    "@ai-sdk/groq": "^2.0.16",
     "@app/auth": "workspace:*",
     "@app/db": "workspace:*",
     "@app/env": "workspace:*",
@@ -17,8 +18,10 @@
     "@elysiajs/openapi": "^1.0.0",
     "@elysiajs/swagger": "^1.0.0",
     "@sinclair/typebox": "^0.34.15",
+    "ai": "^5.0.100",
     "better-auth": "catalog:",
     "dotenv": "catalog:",
+    "drizzle-orm": "^0.45.2",
     "elysia": "^1.4.21",
     "zod": "catalog:"
   },
