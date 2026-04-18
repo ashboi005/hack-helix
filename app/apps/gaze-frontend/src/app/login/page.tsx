@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Space_Grotesk } from "next/font/google"
 
@@ -30,10 +30,23 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  // If already authenticated, redirect
+  useEffect(() => {
+    if (session?.user?.id && !isPending) {
+      router.replace(redirectTarget)
+    }
+  }, [session?.user?.id, isPending, router, redirectTarget])
+
   if (session?.user?.id && !isPending) {
-    router.replace(redirectTarget)
-    return null
+    return (
+      <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+        <section className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center justify-center px-6 py-8 sm:px-8 lg:px-10">
+          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#070e1a]/90 p-6 text-sm text-zinc-300 shadow-[0_25px_40px_-28px_rgba(0,0,0,0.95)] sm:p-8">
+            Redirecting to your dashboard...
+          </div>
+        </section>
+      </main>
+    )
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

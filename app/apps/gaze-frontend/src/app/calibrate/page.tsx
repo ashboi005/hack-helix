@@ -21,7 +21,6 @@ type SetupSession = {
   email: string
   uuid: string
   token: string
-  expiresAt: string
   websocketUrl?: string
 }
 
@@ -95,7 +94,6 @@ export default function CalibratePage() {
           email: authSession!.user.email,
           uuid: eyeToken.uuid,
           token: eyeToken.token,
-          expiresAt: eyeToken.expiresAt,
           websocketUrl: eyeToken.websocketUrl,
         })
       } catch (caughtError) {
@@ -128,7 +126,6 @@ export default function CalibratePage() {
         email: authSession.user.email,
         uuid: eyeToken.uuid,
         token: eyeToken.token,
-        expiresAt: eyeToken.expiresAt,
         websocketUrl: eyeToken.websocketUrl,
       })
     } catch (caughtError) {
@@ -182,20 +179,8 @@ export default function CalibratePage() {
           <div className="space-y-1">
             <h1 className="text-lg font-semibold">Eye Tracker Setup</h1>
             <p className="text-sm text-muted-foreground">
-              Complete the 5-step calibration flow for your authenticated account.
+              Complete the guided 5-step setup to calibrate and enable eye tracking.
             </p>
-          </div>
-
-          <div className="flex gap-2 text-xs text-muted-foreground">
-            {["Source", "ROI", "Eye Model", "Thresholds", "Mode"].map((step, i) => (
-              <span key={step} className="flex items-center gap-1">
-                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-medium">
-                  {i + 1}
-                </span>
-                {step}
-                {i < 4 && <span className="text-border">→</span>}
-              </span>
-            ))}
           </div>
 
           {error && (
@@ -204,49 +189,31 @@ export default function CalibratePage() {
             </p>
           )}
 
-          {session && (
-            <div className="grid gap-2 rounded-md border bg-background p-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-foreground/70">User</div>
-                <div className="font-medium text-foreground">{session.userName}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wide text-foreground/70">UUID</div>
-                <div className="font-mono text-foreground">{session.uuid}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wide text-foreground/70">Expires</div>
-                <div className="text-foreground">{new Date(session.expiresAt).toLocaleString()}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wide text-foreground/70">Email</div>
-                <div className="font-medium text-foreground break-all">{session.email}</div>
-              </div>
-              <div className="md:col-span-2 xl:col-span-4 flex flex-wrap gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => void reissueEyeToken()}
-                  disabled={refreshBusy}
-                  className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-xs font-semibold uppercase tracking-[0.08em] text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {refreshBusy ? "Refreshing..." : "Refresh Token"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleLogout()}
-                  className="inline-flex h-9 items-center justify-center rounded-md border px-4 text-xs font-semibold uppercase tracking-[0.08em] text-foreground hover:bg-muted"
-                >
-                  Log Out
-                </button>
-              </div>
-              <div className="xl:col-span-4">
-                <div className="text-xs uppercase tracking-wide text-foreground/70">WebSocket</div>
-                <div className="font-mono text-foreground break-all text-xs">
-                  {session.websocketUrl ?? "auto-resolved"}
-                </div>
-              </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-4 text-sm text-muted-foreground">
+            <div className="space-y-1">
+              <p className="text-xs uppercase tracking-wide text-foreground/70">Signed In</p>
+              <p className="font-medium text-foreground">{session.userName}</p>
+              <p className="text-xs text-muted-foreground break-all">{session.email}</p>
             </div>
-          )}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void reissueEyeToken()}
+                disabled={refreshBusy}
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-xs font-semibold uppercase tracking-[0.08em] text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {refreshBusy ? "Refreshing..." : "Refresh Session"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="inline-flex h-9 items-center justify-center rounded-md border px-4 text-xs font-semibold uppercase tracking-[0.08em] text-foreground hover:bg-muted"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 

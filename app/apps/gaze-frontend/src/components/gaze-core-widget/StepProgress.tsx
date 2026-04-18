@@ -1,5 +1,13 @@
 ﻿import type { GazeCoreWidgetState } from "./types"
 
+const stepLabels: Record<string, string> = {
+  source: "Source",
+  roi: "ROI",
+  eyeModel: "Eye Model",
+  thresholds: "Thresholds",
+  mode: "Mode",
+}
+
 export function GazeCoreWidgetEntry({ state }: { state: GazeCoreWidgetState }) {
   return (
     <div className="px-6 pt-4">
@@ -15,7 +23,7 @@ export function GazeCoreWidgetEntry({ state }: { state: GazeCoreWidgetState }) {
                   : "bg-muted text-muted-foreground"
             }`}
           >
-            {step}
+            {stepLabels[step] ?? step}
           </div>
         ))}
       </div>

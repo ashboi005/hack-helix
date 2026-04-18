@@ -12,10 +12,10 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer } from "better-auth/plugins";
 
 const authSchema = {
-  user: users,
-  session: sessions,
-  account: accounts,
-  verification: verifications,
+  users,
+  sessions,
+  accounts,
+  verifications,
 };
 
 function toOrigin(url: string): string | null {
