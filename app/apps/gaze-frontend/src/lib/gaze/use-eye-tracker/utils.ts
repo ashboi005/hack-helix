@@ -1,4 +1,4 @@
-import type { GazeVectorReturn } from "@workspace/ui/lib/gaze-core"
+import type { GazeVectorReturn } from "@/lib/gaze-core"
 import type { ModeVectorPoint, PreviewGazeData, RoiRect } from "./types"
 
 export function buildCalibrationGrid(screenWidth: number, screenHeight: number): [number, number][] {
@@ -35,10 +35,10 @@ export function toPreviewGazeData(result: GazeVectorReturn | null): PreviewGazeD
     pupil_center: result.iPupilDetectionReturn.pupilCenter ?? undefined,
     pupil_ellipse: result.pupilSphereEllipse
       ? {
-          center: result.pupilSphereEllipse.center,
-          axes: result.pupilSphereEllipse.axes,
-          angle: result.pupilSphereEllipse.angle,
-        }
+        center: result.pupilSphereEllipse.center,
+        axes: result.pupilSphereEllipse.axes,
+        angle: result.pupilSphereEllipse.angle,
+      }
       : undefined,
     screen_position: result.screenPosition ?? undefined,
     gaze_vector: result.gazeVector,

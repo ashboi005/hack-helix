@@ -4,7 +4,7 @@ import {
   type TestCalibrationData,
   type TestCalibrationPoint,
   testEyeTrackerStorage,
-} from "@/lib/gaze-core-widget-storage"
+} from "@/lib/gaze/gaze-core-widget-storage"
 import type {
   EyeCornerSelection,
   FrameState,

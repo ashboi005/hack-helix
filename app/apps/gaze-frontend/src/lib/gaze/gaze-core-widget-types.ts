@@ -1,5 +1,5 @@
-﻿import type { GazeVectorReturn, RoiRect as PackageRoiRect } from "@workspace/ui/lib/gaze-core"
-import type { TestCalibrationData, TestCalibrationRecord } from "../lib/gaze-core-widget-storage"
+﻿import type { GazeVectorReturn, RoiRect as PackageRoiRect } from "@/lib/gaze/gaze-core"
+import type { TestCalibrationData, TestCalibrationRecord } from "./gaze-core-widget-storage"
 import type { GyroSnapshot } from "./gaze-core-widget-backend/types"
 
 export type Step = "source" | "roi" | "eyeModel" | "thresholds" | "mode"

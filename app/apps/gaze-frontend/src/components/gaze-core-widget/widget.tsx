@@ -1,4 +1,5 @@
-﻿import { useGazeCoreSetupWidget } from "../../hooks/use-gaze-core-setup"
+﻿"use client"
+import { useGazeCoreSetupWidget } from "../../hooks/use-gaze-core-setup"
 import type { GazeCoreWidgetProps, GazeCoreWidgetState } from "./types"
 import { CalibrationOverlay } from "./CalibrationOverlay"
 import { LivePreviewOverlay } from "./LivePreviewOverlay"
@@ -18,29 +19,16 @@ export function GazeCoreWidget(props: GazeCoreWidgetProps = {}) {
 
 export function GazeCoreWidgetView({ state }: { state: GazeCoreWidgetState }) {
   return (
-    <main className="flex min-h-screen flex-col bg-background">
-      <header className="border-b px-6 py-4">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">GazeCore Setup Widget</h1>
-            <p className="text-sm text-muted-foreground">
-              Same calibration setup flow as GazeConnect, using only the local UI package in-browser.
-            </p>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Component path: <code>@workspace/ui/components/gaze-core-widget</code>
-          </div>
-        </div>
-      </header>
+    <main className="flex w-full flex-col bg-background">
 
       <CalibrationOverlay state={state} />
       <LivePreviewOverlay state={state} />
       <GazeCoreWidgetEntry state={state} />
 
-      <div className="flex flex-1 flex-col gap-6 p-6 lg:flex-row">
+      <div className="flex min-h-0 flex-1 items-start gap-6 overflow-x-auto p-6">
         <GazeCoreWidgetPanel state={state} />
 
-        <div className="flex flex-1 flex-col gap-4">
+        <div className="flex min-w-90 max-w-160 flex-1 shrink-0 flex-col gap-4">
           <SourceStep state={state} />
           <RoiStep state={state} />
           <EyeModelStep state={state} />

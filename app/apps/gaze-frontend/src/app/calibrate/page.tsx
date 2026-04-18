@@ -3,8 +3,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { GazeCoreWidget } from "@/components/gaze-core-widget"
-import { getGazeCoreDemoConfig } from "@/lib/gaze-core-demo-config"
-import { issueDemoGazeSession, type GazeCoreDemoSession } from "@/lib/gaze-core-demo-session"
+import { getGazeCoreDemoConfig } from "@/lib/gaze/gaze-core-demo-config"
+import { issueDemoGazeSession, type GazeCoreDemoSession } from "@/lib/gaze/gaze-core-demo-session"
 import { useRouter } from "next/navigation"
 
 export default function CalibratePage() {
@@ -46,19 +46,19 @@ export default function CalibratePage() {
 
   const widgetConfig = session
     ? {
-        backendBaseUrl,
-        apiKey,
-        deviceUuid: session.uuid,
-        livePreviewSocketUrl: session.websocketUrl,
-        livePreviewToken: session.token,
-      }
+      backendBaseUrl,
+      apiKey,
+      deviceUuid: session.uuid,
+      livePreviewSocketUrl: session.websocketUrl,
+      livePreviewToken: session.token,
+    }
     : {
-        backendBaseUrl,
-        apiKey,
-        deviceUuid: initialConfig.deviceUuid,
-        livePreviewSocketUrl: initialConfig.livePreviewSocketUrl,
-        livePreviewToken: initialConfig.livePreviewToken,
-      }
+      backendBaseUrl,
+      apiKey,
+      deviceUuid: initialConfig.deviceUuid,
+      livePreviewSocketUrl: initialConfig.livePreviewSocketUrl,
+      livePreviewToken: initialConfig.livePreviewToken,
+    }
 
   return (
     <main className="min-h-screen bg-background">
