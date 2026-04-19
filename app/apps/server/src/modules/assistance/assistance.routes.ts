@@ -9,6 +9,7 @@ import { ApiError } from "@/utils/api-error";
 import { fastQuery } from "./autosage.service";
 import { classifyDistraction } from "./distraction.service";
 import { extractTextFromRegion } from "./ocr.service";
+import { summariseYoutubeTranscript } from "./youtube-summary.service";
 
 const documentId = z.string().uuid();
 
@@ -58,6 +59,10 @@ const checkDistractionBody = z.object({
     .min(1)
     .max(2000)
     .optional(),
+});
+
+const summariseVideoBody = z.object({
+  videoUrl: z.url(),
 });
 
 function requireKnowledgeBase(kbId: string | null): string {
@@ -125,6 +130,24 @@ export const assistanceRoutes = new Elysia({ prefix: "/assistance", tags: ["Assi
       body: explainRereadBody,
       detail: {
         summary: "Explain text from a re-read document region",
+      },
+    },
+  )
+  .post(
+    "/summarise-video",
+    async ({ body }) => {
+      const result = await summariseYoutubeTranscript(body.videoUrl);
+
+      return {
+        summary: result.summary,
+        transcriptLength: result.transcriptLength,
+      };
+    },
+    {
+      auth: true,
+      body: summariseVideoBody,
+      detail: {
+        summary: "Summarise a YouTube video by fetching transcript and using Groq",
       },
     },
   )
