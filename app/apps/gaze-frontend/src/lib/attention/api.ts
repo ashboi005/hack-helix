@@ -17,6 +17,16 @@ type InitiateUploadResponse = {
 export type SummariseRequest = { docId: string; scope: "full" } | { docId: string; scope: "partial"; pageNumbers: number[] }
 export type SummariseResponse = { summary: string }
 
+export type SummariseLineRequest = {
+  docId: string
+  pageNumber: number
+  regionBase64: string
+}
+
+export type SummariseLineResponse = {
+  summary: string
+}
+
 export type ExplainRereadRequest = {
   docId: string
   pageNumber: number
@@ -25,7 +35,7 @@ export type ExplainRereadRequest = {
 
 export type ExplainRereadResponse = { explanation: string }
 
-type CheckDistractionBackendBody = {
+export type CheckDistractionBackendBody = {
   docId: string
   fullPageBase64: string
   fullPagePageNumber: number
@@ -33,6 +43,8 @@ type CheckDistractionBackendBody = {
   pageNumbers: number[]
   recentCoordinates?: CheckDistractionRequest["recentCoordinates"]
 }
+
+
 
 export type CheckDistractionResponse = {
   genuine: boolean
@@ -114,6 +126,19 @@ export async function summariseDocument(input: SummariseRequest): Promise<Summar
   })
 
   return parseJsonResponse<SummariseResponse>(response, "Unable to fetch summary")
+}
+
+export async function summariseLine(input: SummariseLineRequest): Promise<SummariseLineResponse> {
+  const response = await fetch(buildUrl("/assistance/summarise-line"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify(input),
+  })
+
+  return parseJsonResponse<SummariseLineResponse>(response, "Unable to summarise line")
 }
 
 export function buildSummariseRequest(docId: string, options?: { pageNumbers?: number[] }): SummariseRequest {

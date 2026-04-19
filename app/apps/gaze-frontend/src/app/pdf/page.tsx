@@ -7,29 +7,29 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type MouseEvent,
   type WheelEvent,
 } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Space_Grotesk } from "next/font/google"
 
 import { useGazeLiveOverlay } from "@/components/gaze-live-overlay-provider"
 import { useSession } from "@/lib/auth-client"
 import {
-  checkDistraction,
   explainReread,
   getActiveDocumentId,
   getDocument,
   initiateDocumentUpload,
   listDocuments,
-  mapRegionPayload,
   requestSummary,
   setActiveDocumentId,
   type DocumentSummary,
   uploadPdfToPresignedUrl,
 } from "@/lib/attention/api"
 import { detectAttentionMode } from "@/lib/attention/detector"
-import { buildErraticJumpScreenshots, buildRegionScreenshots, canvasToBase64, cropRegionAtPointBase64 } from "@/lib/attention/screenshots"
+import { canvasToBase64, cropLineAtPointBase64, renderGazeMarkedPageBase64 } from "@/lib/attention/screenshots"
 import { appendCoordinateSample, getLastSeconds, readCoordinateWindow, writeCoordinateWindow } from "@/lib/attention/storage"
 import type { AttentionMode, CoordinateSample, ScrollSample } from "@/lib/attention/types"
 
@@ -60,6 +60,25 @@ type PdfWindow = Window & {
   pdfjsLib?: PdfJsRuntime
 }
 
+type AssistPromptKind = "summarise-full" | "explain-reread"
+
+type AssistPromptState = {
+  kind: AssistPromptKind
+  mode: AttentionMode
+  title: string
+  description: string
+}
+
+type EvidenceCapture = {
+  createdAt: number
+  pageNumber: number
+  lookedPoint: { x: number; y: number }
+  fullPageBase64: string
+  markedPageBase64: string
+  lineBase64: string
+  actionLabel: string
+}
+
 export default function PdfPage() {
   const router = useRouter()
   const { data: authSession, isPending: authPending } = useSession()
@@ -68,7 +87,7 @@ export default function PdfPage() {
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
   const [activeDocId, setActiveDocIdState] = useState<string | null>(null)
   const [activeFileName, setActiveFileName] = useState("")
-  const [status, setStatus] = useState("Ready")
+  const [, setStatus] = useState("Ready")
   const [error, setError] = useState("")
 
   const [pdfLoaded, setPdfLoaded] = useState(false)
@@ -84,21 +103,27 @@ export default function PdfPage() {
   const [summaryText, setSummaryText] = useState("")
   const [explanationText, setExplanationText] = useState("")
   const [distractionText, setDistractionText] = useState("")
+  const [assistPrompt, setAssistPrompt] = useState<AssistPromptState | null>(null)
+  const [assistBusy, setAssistBusy] = useState(false)
+  const [evidenceCapture, setEvidenceCapture] = useState<EvidenceCapture | null>(null)
+  const [uploadDragActive, setUploadDragActive] = useState(false)
 
   const [coordinates, setCoordinates] = useState<CoordinateSample[]>([])
   const [scrollSamples, setScrollSamples] = useState<ScrollSample[]>([])
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null)
 
-  const [lastSummaryAt, setLastSummaryAt] = useState(0)
-  const [lastExplainAt, setLastExplainAt] = useState(0)
-  const [lastDistractionAt, setLastDistractionAt] = useState(0)
-
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pdfDocRef = useRef<PdfDocumentLike | null>(null)
   const pdfJsRef = useRef<PdfJsRuntime | null>(null)
+  const uploadDropInputRef = useRef<HTMLInputElement>(null)
   const persistAtRef = useRef(0)
   const mockSampleAtRef = useRef(0)
   const lastLiveOverlaySampleTsRef = useRef(0)
+  const lastPromptedModeRef = useRef<AttentionMode>("reading")
+  const promptCooldownRef = useRef<Record<AssistPromptKind, number>>({
+    "summarise-full": 0,
+    "explain-reread": 0,
+  })
   const detectionTickRef = useRef<() => void>(() => {})
 
   const isAuthenticated = Boolean(authSession?.user?.id)
@@ -151,18 +176,6 @@ export default function PdfPage() {
       setModeReason(
         `fwd ${result.metrics.leftToRightRatio.toFixed(2)} | reread ${result.metrics.rightToLeftRatio.toFixed(2)} | jumps ${result.metrics.erraticRatio.toFixed(2)}`,
       )
-
-      if (result.mode === "scanning" && result.metrics.scrollVelocity > 2.8) {
-        void maybeSummarise()
-      }
-
-      if (result.mode === "rereading") {
-        void maybeExplainReread()
-      }
-
-      if (result.mode === "distraction") {
-        void maybeCheckDistraction()
-      }
     }
   })
 
@@ -236,6 +249,36 @@ export default function PdfPage() {
     mockEyeTrackerEnabled,
   ])
 
+  useEffect(() => {
+    const previousMode = lastPromptedModeRef.current
+    if (mode === previousMode) return
+    lastPromptedModeRef.current = mode
+
+    if (!isAuthenticated || !activeDocId || !pdfLoaded || !lastPoint) return
+    if (assistPrompt || assistBusy) return
+    if (mode !== "distraction" && mode !== "rereading") return
+
+    const kind: AssistPromptKind = mode === "distraction" ? "summarise-full" : "explain-reread"
+    const now = Date.now()
+    if (now - promptCooldownRef.current[kind] < 25_000) return
+
+    setAssistPrompt(
+      mode === "distraction"
+        ? {
+            kind,
+            mode,
+            title: "You look distracted",
+            description: "Generate a quick AI summary for the whole PDF? Press Space to confirm.",
+          }
+        : {
+            kind,
+            mode,
+            title: "Rereading detected",
+            description: "Explain the specific line you are repeatedly reading? Press Space to confirm.",
+          },
+    )
+  }, [activeDocId, assistBusy, assistPrompt, isAuthenticated, lastPoint, mode, pdfLoaded])
+
   // Cursor Y as a percentage of the canvas height (0-100), used for the spotlight overlay
   const cursorYPercent = useMemo(() => {
     const canvas = canvasRef.current
@@ -243,11 +286,8 @@ export default function PdfPage() {
     return Math.max(0, Math.min(100, (lastPoint.y / Math.max(1, canvas.height)) * 100))
   }, [lastPoint])
 
-  const onFileChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0]
-      if (!file) return
-
+  const handleSelectedPdfFile = useCallback(
+    async (file: File) => {
       setError("")
 
       if (!isAuthenticated) {
@@ -279,6 +319,48 @@ export default function PdfPage() {
     },
     [isAuthenticated],
   )
+
+  const onFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      if (!file) return
+
+      await handleSelectedPdfFile(file)
+      event.target.value = ""
+    },
+    [handleSelectedPdfFile],
+  )
+
+  const onReaderDropZoneDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!uploadDragActive) {
+      setUploadDragActive(true)
+    }
+  }, [uploadDragActive])
+
+  const onReaderDropZoneDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setUploadDragActive(false)
+  }, [])
+
+  const onReaderDropZoneDrop = useCallback(async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setUploadDragActive(false)
+
+    const file = event.dataTransfer.files?.[0]
+    if (!file) return
+
+    const looksLikePdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+    if (!looksLikePdf) {
+      setError("Please upload a PDF file.")
+      return
+    }
+
+    await handleSelectedPdfFile(file)
+  }, [handleSelectedPdfFile])
 
   const onReaderMouseMove = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -332,115 +414,93 @@ export default function PdfPage() {
     }
   }
 
-  async function maybeSummarise() {
-    if (!isAuthenticated || !activeDocId) return
+  const buildEvidenceCapture = useCallback(
+    (actionLabel: string): EvidenceCapture | null => {
+      const canvas = canvasRef.current
+      if (!canvas || !lastPoint) return null
 
-    const now = Date.now()
-    if (now - lastSummaryAt < 90_000) return
+      const lookedPoint = {
+        x: clamp(lastPoint.x, 0, canvas.width),
+        y: clamp(lastPoint.y, 0, canvas.height),
+      }
 
-    try {
-      setLastSummaryAt(now)
-      const response =
-        currentPage > 1
-          ? await requestSummary({
-              docId: activeDocId,
-              scope: "partial",
-              pageNumbers: [currentPage],
-            })
-          : await requestSummary({ docId: activeDocId, scope: "full" })
-
-      setSummaryText(response.summary)
-      setStatus("Summary suggestion generated")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to summarise")
-    }
-  }
-
-  async function maybeExplainReread() {
-    if (!isAuthenticated || !activeDocId || !lastPoint || !canvasRef.current) return
-
-    const now = Date.now()
-    if (now - lastExplainAt < 70_000) return
-
-    try {
-      setLastExplainAt(now)
-      const regionBase64 = cropRegionAtPointBase64(canvasRef.current, lastPoint.x, lastPoint.y)
-      const response = await explainReread({
-        docId: activeDocId,
+      return {
+        createdAt: Date.now(),
         pageNumber: currentPage,
-        regionBase64,
-      })
+        lookedPoint,
+        fullPageBase64: canvasToBase64(canvas),
+        markedPageBase64: renderGazeMarkedPageBase64(canvas, lookedPoint.x, lookedPoint.y),
+        lineBase64: cropLineAtPointBase64(canvas, lookedPoint.x, lookedPoint.y),
+        actionLabel,
+      }
+    },
+    [currentPage, lastPoint],
+  )
 
-      setExplanationText(response.explanation)
-      setStatus("Reread explanation generated")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to explain reread")
-    }
-  }
+  const runAssistPrompt = useCallback(
+    async (kind: AssistPromptKind) => {
+      if (!isAuthenticated || !activeDocId) return
+      if (assistBusy) return
 
-  async function maybeCheckDistraction() {
-    if (!isAuthenticated || !activeDocId || !canvasRef.current) {
-      console.warn("[distraction] skipped: auth=%s docId=%s canvas=%s", isAuthenticated, activeDocId, !!canvasRef.current)
-      return
-    }
-
-    const now = Date.now()
-    if (now - lastDistractionAt < 20_000) {
-      console.log("[distraction] cooldown active, %ds remaining", ((20_000 - (now - lastDistractionAt)) / 1000).toFixed(1))
-      return
-    }
-
-    const last15 = getLastSeconds(coordinates, 15)
-    if (last15.length < 8) {
-      console.log("[distraction] not enough samples: %d (need 8)", last15.length)
-      return
-    }
-
-    try {
-      // Full page screenshot
-      const fullPageBase64 = canvasToBase64(canvasRef.current)
-
-      // Capture erratic jump screenshots (from + to for each big jump)
-      const erraticRegions = buildErraticJumpScreenshots(canvasRef.current, last15, currentPage, 2)
-      console.log("[distraction] erratic regions: %d", erraticRegions.length)
-
-      // Fall back to generic deflection clusters if no big jumps found
-      const regions = mapRegionPayload(
-        erraticRegions.length >= 2
-          ? erraticRegions
-          : buildRegionScreenshots(canvasRef.current, coordinates, currentPage, 5),
+      const evidence = buildEvidenceCapture(
+        kind === "summarise-full" ? "Distraction full-document summary" : "Reread line explanation",
       )
-      if (regions.length < 2) {
-        console.log("[distraction] not enough regions: %d (need 2)", regions.length)
+      if (!evidence) {
+        setStatus("Need an active page and gaze point before generating assistance")
         return
       }
 
-      console.log("[distraction] firing backend check with %d regions", regions.length)
+      promptCooldownRef.current[kind] = Date.now()
+      setAssistBusy(true)
+      setAssistPrompt(null)
+      setEvidenceCapture(evidence)
+      setError("")
 
-      const response = await checkDistraction({
-        docId: activeDocId,
-        fullPageBase64,
-        fullPagePageNumber: currentPage,
-        regionImages: regions,
-        pageNumbers: Array.from(new Set([currentPage, ...regions.map((region) => region.pageNumber)])),
-        recentCoordinates: last15.slice(-2000).map((sample) => ({
-          x: sample.x,
-          y: sample.y,
-          ts: sample.ts,
-          source: sample.source,
-          pageNumber: sample.pageNumber,
-        })),
-      })
+      try {
+        if (kind === "summarise-full") {
+          setStatus("Generating full PDF summary from distraction prompt...")
+          const response = await requestSummary({
+            docId: activeDocId,
+            scope: "full",
+          })
+          setSummaryText(response.summary)
+          setDistractionText("Distraction prompt accepted. Generated a summary for the whole PDF.")
+          setStatus("Full PDF summary generated")
+          return
+        }
 
-      console.log("[distraction] backend response: genuine=%s reason=%s", response.genuine, response.reason)
-      setDistractionText(`${response.genuine ? "Genuine pattern" : "Likely distraction"}: ${response.reason}`)
-      setStatus("Distraction check completed")
-      setLastDistractionAt(now)
-    } catch (err) {
-      console.error("[distraction] backend error:", err)
-      setError(err instanceof Error ? err.message : "Failed distraction check")
+        setStatus("Generating reread explanation for focused line...")
+        const response = await explainReread({
+          docId: activeDocId,
+          pageNumber: evidence.pageNumber,
+          regionBase64: evidence.lineBase64,
+        })
+        setExplanationText(response.explanation)
+        setDistractionText("Reread prompt accepted. Generated an explanation for the current line.")
+        setStatus("Line explanation generated")
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to generate assistance")
+      } finally {
+        setAssistBusy(false)
+      }
+    },
+    [activeDocId, assistBusy, buildEvidenceCapture, isAuthenticated],
+  )
+
+  useEffect(() => {
+    if (!assistPrompt) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return
+      if (isEditableTarget(event.target)) return
+      event.preventDefault()
+      if (assistBusy) return
+      void runAssistPrompt(assistPrompt.kind)
     }
-  }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [assistBusy, assistPrompt, runAssistPrompt])
 
   function pushCoordinate(input: { x: number; y: number; source: "eye" | "cursor"; pageNumber: number }) {
     const sample: CoordinateSample = {
@@ -519,29 +579,44 @@ export default function PdfPage() {
 
   if (authPending) {
     return (
-      <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] px-6 py-10 text-zinc-100`}>
-        <div className="mx-auto max-w-4xl rounded-xl border border-white/10 bg-[#0a1220]/90 p-6 text-sm text-zinc-300">
-          Checking authentication for PDF workspace...
-        </div>
+      <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+        <section className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-8 lg:px-10">
+          <div className="rounded-xl border border-white/10 bg-[#070e1a]/90 p-6 text-sm text-zinc-300 shadow-[0_18px_32px_-28px_rgba(0,0,0,0.95)]">
+            Checking authentication for PDF workspace...
+          </div>
+        </section>
       </main>
     )
   }
 
   if (!isAuthenticated) {
     return (
-      <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] px-6 py-10 text-zinc-100`}>
-        <div className="mx-auto max-w-4xl rounded-xl border border-white/10 bg-[#0a1220]/90 p-6 text-sm text-zinc-300">
-          Redirecting to login...
-        </div>
+      <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+        <section className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-8 lg:px-10">
+          <div className="rounded-xl border border-white/10 bg-[#070e1a]/90 p-6 text-sm text-zinc-300 shadow-[0_18px_32px_-28px_rgba(0,0,0,0.95)]">
+            Redirecting to login...
+          </div>
+        </section>
       </main>
     )
   }
 
   return (
-    <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] text-zinc-100`}>
-      <section className="mx-auto flex min-h-screen w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="rounded-2xl border border-white/10 bg-[#0a1220]/90 p-5 shadow-[0_20px_45px_-35px_rgba(0,0,0,0.95)]">
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">PDF Workspace</p>
+    <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+      <section className="relative mx-auto flex min-h-screen w-full max-w-[1800px] flex-col gap-5 px-4 py-6 sm:px-5 lg:px-6">
+        <header className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-5 shadow-[0_20px_45px_-35px_rgba(0,0,0,0.95)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">PDF Workspace</p>
+            <Link
+              href="/"
+              className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-zinc-100 transition-colors hover:bg-white/20"
+            >
+              Back To Home
+            </Link>
+          </div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">ADHD Attention Reader</h1>
           <p className="mt-2 text-sm text-zinc-300">
             Upload PDF, track reading modes, keep a 60-second coordinate window, and trigger assistance routes from
@@ -549,24 +624,18 @@ export default function PdfPage() {
           </p>
         </header>
 
-        <div className="grid gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
+        <div className="grid gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.7fr)]">
           <aside className="space-y-4">
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.13em] text-zinc-300">PDF Upload</h2>
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-300">Assistance</p>
               <div className="mt-3 space-y-3">
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={(event) => void onFileChange(event)}
-                  className="block w-full text-xs text-zinc-300 file:mr-3 file:rounded-md file:border file:border-white/15 file:bg-[#11203a] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-zinc-100"
-                />
-                <p className="text-xs text-zinc-400">
-                  Calls `POST /documents/initiate-upload`, uploads with presigned URL, then stores `documentId` locally.
-                </p>
+                <ResponseCard title="Summary" content={summaryText} accent="emerald" />
+                <ResponseCard title="Reread Explanation" content={explanationText} accent="cyan" />
+                <ResponseCard title="Distraction Verdict" content={distractionText} accent="amber" />
               </div>
             </section>
 
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
               <h2 className="text-sm font-semibold uppercase tracking-[0.13em] text-zinc-300">Documents</h2>
               <button
                 onClick={() => void refreshDocuments()}
@@ -592,7 +661,7 @@ export default function PdfPage() {
                     className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${
                       activeDocId === document.id
                         ? "border-cyan-300/60 bg-cyan-500/18 text-cyan-100"
-                        : "border-white/10 bg-[#0d1727] text-zinc-300 hover:border-white/20"
+                        : "border-white/10 bg-[#0d1628] text-zinc-300 hover:border-white/20"
                     }`}
                   >
                     <div className="font-medium">{document.fileName}</div>
@@ -603,41 +672,43 @@ export default function PdfPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.13em] text-zinc-300">Mode</h2>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <ModeChip mode={mode} value="reading" />
-                <ModeChip mode={mode} value="rereading" />
-                <ModeChip mode={mode} value="scanning" />
-                <ModeChip mode={mode} value="distraction" />
-              </div>
-
-              <button
-                onClick={() => setMockEyeTrackerEnabled((enabled) => !enabled)}
-                className={`mt-3 h-9 w-full rounded-md border text-xs font-semibold uppercase tracking-[0.11em] transition ${
-                  mockEyeTrackerEnabled
-                    ? "border-cyan-300/55 bg-cyan-500/20 text-cyan-100"
-                    : "border-white/15 bg-[#101a2a] text-zinc-300 hover:border-white/30"
-                }`}
-              >
-                Mock Eye Tracker (Cursor): {mockEyeTrackerEnabled ? "On" : "Off"}
-              </button>
-
-              <p className="mt-2 text-[11px] text-zinc-400">{modeReason}</p>
-            </section>
           </aside>
 
           <section className="space-y-4">
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={(event) => void onFileChange(event)}
+                ref={uploadDropInputRef}
+                className="hidden"
+              />
+
+              <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr] md:items-center">
+                <div className="min-w-0">
                   <p className="text-sm font-semibold text-zinc-100">Reader Surface</p>
                   <p className="text-xs text-zinc-400">
                     {activeFileName ? `${activeFileName} | doc ${activeDocId?.slice(0, 8) ?? "-"}` : "No PDF loaded"}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-xs uppercase tracking-[0.11em] text-zinc-400">Mode</span>
+                  <ModeChip mode={mode} value={mode} />
+                  <button
+                    type="button"
+                    onClick={() => setMockEyeTrackerEnabled((enabled) => !enabled)}
+                    className={`h-7 rounded-md border px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] transition ${
+                      mockEyeTrackerEnabled
+                        ? "border-white/35 bg-white/15 text-zinc-100"
+                        : "border-white/20 bg-white/5 text-zinc-300 hover:bg-white/10"
+                    }`}
+                  >
+                    Mock Eye: {mockEyeTrackerEnabled ? "On" : "Off"}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-start gap-2 md:justify-end">
                   <button
                     onClick={() => setCurrentPage((value) => clamp(value - 1, 1, totalPages || 1))}
                     className="h-8 rounded-md border border-white/15 bg-[#11203a] px-3 text-xs font-medium text-zinc-200"
@@ -658,6 +729,8 @@ export default function PdfPage() {
                 </div>
               </div>
 
+              <p className="mt-2 text-center text-[11px] text-zinc-400">{modeReason}</p>
+
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   onClick={() => setRenderScale((value) => clamp(value - 0.1, 0.9, 2.3))}
@@ -671,112 +744,128 @@ export default function PdfPage() {
                 >
                   Zoom +
                 </button>
-                <button
-                  onClick={() => void maybeSummarise()}
-                  className="h-8 rounded-md border border-emerald-300/35 bg-emerald-500/16 px-3 text-xs text-emerald-100"
-                >
-                  Trigger Summary
-                </button>
-                <button
-                  onClick={() => void maybeExplainReread()}
-                  className="h-8 rounded-md border border-cyan-300/35 bg-cyan-500/16 px-3 text-xs text-cyan-100"
-                >
-                  Trigger Reread Explain
-                </button>
-                <button
-                  onClick={() => void maybeCheckDistraction()}
-                  className="h-8 rounded-md border border-amber-300/35 bg-amber-500/16 px-3 text-xs text-amber-100"
-                >
-                  Trigger Distraction Check
-                </button>
               </div>
 
               <div
                 onMouseMove={onReaderMouseMove}
                 onWheel={onReaderWheel}
+                onDragOver={onReaderDropZoneDragOver}
+                onDragLeave={onReaderDropZoneDragLeave}
+                onDrop={(event) => void onReaderDropZoneDrop(event)}
                 className="relative mt-4 overflow-auto rounded-xl border border-white/10 bg-[#03060e] p-3"
-                style={{ minHeight: 640 }}
+                style={{ minHeight: pdfLoaded ? 640 : 460 }}
               >
-                <div className="relative mx-auto w-fit">
-                  <canvas ref={canvasRef} className="block max-w-full rounded-md bg-white" />
+                {!pdfLoaded ? (
+                  <button
+                    type="button"
+                    onClick={() => uploadDropInputRef.current?.click()}
+                    className={`mx-auto flex h-[360px] w-full max-w-[860px] flex-col items-center justify-center rounded-xl border border-dashed px-6 text-center transition ${
+                      uploadDragActive
+                        ? "border-white/45 bg-white/10"
+                        : "border-white/25 bg-white/[0.03] hover:border-white/40 hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <span className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-200">Upload PDF to Start</span>
+                    <span className="mt-2 text-sm text-zinc-400">Drag and drop a PDF here or click to choose file.</span>
+                    <span className="mt-4 rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-xs uppercase tracking-[0.1em] text-zinc-200">
+                      Choose PDF
+                    </span>
+                  </button>
+                ) : (
+                  <div className="relative mx-auto w-fit">
+                    <canvas ref={canvasRef} className="block max-w-full rounded-md bg-white" />
 
-                  {pdfLoaded && lastPoint && (() => {
-                    // Spotlight band: 3% of canvas height centered on cursor
-                    const bandHalf = 1.5
-                    const aboveEnd = Math.max(0, cursorYPercent - bandHalf)
-                    const belowStart = Math.min(100, cursorYPercent + bandHalf)
+                    {pdfLoaded && lastPoint && (() => {
+                      // Spotlight band: slightly larger than before for better readability
+                      const bandHalf = 2.8
+                      const aboveEnd = Math.max(0, cursorYPercent - bandHalf)
+                      const belowStart = Math.min(100, cursorYPercent + bandHalf)
 
-                    return (
-                      <div className="pointer-events-none absolute inset-0 rounded-md">
-                        {/* Already-read zone (above cursor) */}
-                        {aboveEnd > 0 && (
+                      return (
+                        <div className="pointer-events-none absolute inset-0 rounded-md">
+                          {/* Already-read zone (above cursor) */}
+                          {aboveEnd > 0 && (
+                            <div
+                              className="absolute inset-x-0 top-0"
+                              style={{
+                                height: `${aboveEnd}%`,
+                                background: "rgba(0, 0, 0, 0.45)",
+                                transition: "height 0.12s linear",
+                              }}
+                            />
+                          )}
+                          {/* Current reading band — transparent with highlight border */}
                           <div
-                            className="absolute inset-x-0 top-0"
+                            className="absolute inset-x-0 ring-1 ring-cyan-300/55"
                             style={{
-                              height: `${aboveEnd}%`,
-                              background: "rgba(0, 0, 0, 0.45)",
-                              transition: "height 0.12s linear",
+                              top: `${aboveEnd}%`,
+                              height: `${belowStart - aboveEnd}%`,
+                              transition: "top 0.12s linear, height 0.12s linear",
                             }}
                           />
-                        )}
-                        {/* Current reading band — transparent with highlight border */}
-                        <div
-                          className="absolute inset-x-0 ring-1 ring-cyan-300/55"
-                          style={{
-                            top: `${aboveEnd}%`,
-                            height: `${belowStart - aboveEnd}%`,
-                            transition: "top 0.12s linear, height 0.12s linear",
-                          }}
-                        />
-                        {/* Not-yet-read zone (below cursor) */}
-                        {belowStart < 100 && (
-                          <div
-                            className="absolute inset-x-0 bottom-0"
-                            style={{
-                              height: `${100 - belowStart}%`,
-                              background: "rgba(0, 0, 0, 0.25)",
-                              transition: "height 0.12s linear",
-                            }}
-                          />
-                        )}
-                      </div>
-                    )
-                  })()}
+                          {/* Not-yet-read zone (below cursor) */}
+                          {belowStart < 100 && (
+                            <div
+                              className="absolute inset-x-0 bottom-0"
+                              style={{
+                                height: `${100 - belowStart}%`,
+                                background: "rgba(0, 0, 0, 0.25)",
+                                transition: "height 0.12s linear",
+                              }}
+                            />
+                          )}
+                        </div>
+                      )
+                    })()}
 
-                  {lastPoint && pdfLoaded && (
-                    <span
-                      className="pointer-events-none absolute -ml-1.5 -mt-1.5 h-3 w-3 rounded-full bg-cyan-300 shadow-[0_0_0_3px_rgba(34,211,238,0.35)]"
-                      style={{
-                        left: `${(lastPoint.x / Math.max(1, canvasRef.current?.width ?? 1)) * 100}%`,
-                        top: `${(lastPoint.y / Math.max(1, canvasRef.current?.height ?? 1)) * 100}%`,
-                      }}
-                    />
-                  )}
-                </div>
+                    {lastPoint && pdfLoaded && (
+                      <span
+                        className="pointer-events-none absolute -ml-1.5 -mt-1.5 h-3 w-3 rounded-full bg-cyan-300 shadow-[0_0_0_3px_rgba(34,211,238,0.35)]"
+                        style={{
+                          left: `${(lastPoint.x / Math.max(1, canvasRef.current?.width ?? 1)) * 100}%`,
+                          top: `${(lastPoint.y / Math.max(1, canvasRef.current?.height ?? 1)) * 100}%`,
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
 
               <p className="mt-2 text-xs text-zinc-400">
-                Sliding coordinate window keeps only the latest 60 seconds. Last 15 seconds are sent with distraction
-                checks along with full page screenshot and 5 region images.
+                Sliding coordinate window keeps only the latest 60 seconds. Assistance prompts use line-focused
+                screenshots from the current gaze point.
               </p>
             </section>
 
-            <section className="grid gap-4 md:grid-cols-3">
-              <ResponseCard title="Summary" content={summaryText} accent="emerald" />
-              <ResponseCard title="Reread Explanation" content={explanationText} accent="cyan" />
-              <ResponseCard title="Distraction Verdict" content={distractionText} accent="amber" />
-            </section>
+            {evidenceCapture && (
+              <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-300">Gaze Evidence</p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  {evidenceCapture.actionLabel} | page {evidenceCapture.pageNumber} | ({Math.round(evidenceCapture.lookedPoint.x)},{" "}
+                  {Math.round(evidenceCapture.lookedPoint.y)})
+                </p>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <EvidenceImage title="Whole Page" base64={evidenceCapture.fullPageBase64} />
+                  <EvidenceImage title="Looked Region" base64={evidenceCapture.markedPageBase64} />
+                  <EvidenceImage title="Specific Line" base64={evidenceCapture.lineBase64} />
+                </div>
+              </section>
+            )}
 
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4 text-xs">
-              <p className="font-medium text-zinc-200">Status: {status}</p>
-              {error && <p className="mt-1 text-rose-300">Error: {error}</p>}
-              <p className="mt-2 text-zinc-400">
-                Eye input source: {mockEyeTrackerEnabled ? "Mock (cursor as eye tracker)" : "Real eye stream or cursor fallback"}
-              </p>
-              <p className="mt-2 text-zinc-400">
-                Samples in 60s window: {coordinates.length} | Current page: {currentPage} | Render scale: {renderScale.toFixed(2)}
-              </p>
-            </section>
+            {assistPrompt && (
+              <AssistPromptToast
+                prompt={assistPrompt}
+                busy={assistBusy}
+                onConfirm={() => void runAssistPrompt(assistPrompt.kind)}
+                onDismiss={() => setAssistPrompt(null)}
+              />
+            )}
+
+            {error && (
+              <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4 text-xs">
+                <p className="text-rose-300">Error: {error}</p>
+              </section>
+            )}
           </section>
         </div>
       </section>
@@ -821,6 +910,63 @@ function ResponseCard({ title, content, accent }: { title: string; content: stri
       <p className="mt-2 max-h-56 overflow-auto text-sm leading-relaxed text-zinc-200">{content || "No response yet."}</p>
     </article>
   )
+}
+
+function EvidenceImage({ title, base64 }: { title: string; base64: string }) {
+  return (
+    <article className="rounded-lg border border-white/10 bg-[#0d1727] p-2">
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.09em] text-zinc-400">{title}</p>
+      <img src={`data:image/png;base64,${base64}`} alt={title} className="w-full rounded-md border border-white/10 bg-black/30" />
+    </article>
+  )
+}
+
+function AssistPromptToast({
+  prompt,
+  busy,
+  onConfirm,
+  onDismiss,
+}: {
+  prompt: AssistPromptState
+  busy: boolean
+  onConfirm: () => void
+  onDismiss: () => void
+}) {
+  const tone = prompt.mode === "distraction" ? "border-amber-300/45 bg-[#1c1310]" : "border-cyan-300/45 bg-[#0f1722]"
+
+  return (
+    <div className="fixed inset-x-0 bottom-5 z-50 px-4">
+      <div className={`mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-xl border p-4 shadow-2xl ${tone}`}>
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-300">{prompt.title}</p>
+        <p className="text-sm text-zinc-100">{prompt.description}</p>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="h-8 rounded-md border border-cyan-300/45 bg-cyan-500/20 px-3 font-semibold uppercase tracking-[0.08em] text-cyan-100 disabled:opacity-60"
+          >
+            {busy ? "Generating..." : "Confirm (Space)"}
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={busy}
+            className="h-8 rounded-md border border-white/20 bg-white/5 px-3 font-semibold uppercase tracking-[0.08em] text-zinc-200 disabled:opacity-60"
+          >
+            Not now
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
 }
 
 function clamp(value: number, min: number, max: number) {

@@ -104,6 +104,46 @@ export function cropRegionAtPointBase64(canvas: HTMLCanvasElement, x: number, y:
   return canvasToBase64(cropAroundPoint(canvas, x, y))
 }
 
+export function cropLineAtPointBase64(canvas: HTMLCanvasElement, x: number, y: number): string {
+  return canvasToBase64(cropLineAroundPoint(canvas, x, y))
+}
+
+export function renderGazeMarkedPageBase64(canvas: HTMLCanvasElement, x: number, y: number): string {
+  const marked = document.createElement("canvas")
+  marked.width = canvas.width
+  marked.height = canvas.height
+
+  const ctx = marked.getContext("2d")
+  if (!ctx) return canvasToBase64(canvas)
+
+  const gx = clamp(Math.round(x), 0, Math.max(0, canvas.width - 1))
+  const gy = clamp(Math.round(y), 0, Math.max(0, canvas.height - 1))
+  const bandHeight = Math.min(64, canvas.height)
+  const top = clamp(Math.round(gy - bandHeight / 2), 0, Math.max(0, canvas.height - bandHeight))
+
+  ctx.drawImage(canvas, 0, 0)
+
+  ctx.fillStyle = "rgba(34, 211, 238, 0.16)"
+  ctx.fillRect(0, top, canvas.width, bandHeight)
+
+  ctx.strokeStyle = "rgba(34, 211, 238, 0.88)"
+  ctx.lineWidth = 2
+  ctx.strokeRect(0, top, canvas.width, bandHeight)
+
+  ctx.beginPath()
+  ctx.arc(gx, gy, 7, 0, Math.PI * 2)
+  ctx.fillStyle = "rgba(34, 211, 238, 0.95)"
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(gx, gy, 15, 0, Math.PI * 2)
+  ctx.strokeStyle = "rgba(34, 211, 238, 0.55)"
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  return canvasToBase64(marked)
+}
+
 function stripDataUrlPrefix(dataUrl: string): string {
   const marker = ","
   const index = dataUrl.indexOf(marker)
@@ -158,6 +198,33 @@ function cropAroundPoint(canvas: HTMLCanvasElement, x: number, y: number): HTMLC
   if (!ctx) return offscreen
 
   ctx.drawImage(canvas, sx, sy, width, height, 0, 0, width, height)
+
+  return offscreen
+}
+
+function cropLineAroundPoint(canvas: HTMLCanvasElement, x: number, y: number): HTMLCanvasElement {
+  const bandHeight = Math.min(72, canvas.height)
+  const sx = 0
+  const sy = clamp(Math.round(y - bandHeight / 2), 0, Math.max(0, canvas.height - bandHeight))
+  const width = canvas.width
+  const height = bandHeight
+
+  const offscreen = document.createElement("canvas")
+  offscreen.width = width
+  offscreen.height = height
+
+  const ctx = offscreen.getContext("2d")
+  if (!ctx) return offscreen
+
+  ctx.drawImage(canvas, sx, sy, width, height, 0, 0, width, height)
+
+  const relativeX = clamp(Math.round(x), 0, Math.max(0, width - 1))
+  ctx.strokeStyle = "rgba(34, 211, 238, 0.9)"
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(relativeX, 0)
+  ctx.lineTo(relativeX, height)
+  ctx.stroke()
 
   return offscreen
 }

@@ -34,46 +34,53 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --background: oklch(0.13 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: oklch(0.96 0 0);
+  --primary: oklch(0.96 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.24 0 0);
+  --muted-foreground: oklch(0.75 0 0);
+  --accent: oklch(0.24 0 0);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.7 0.02 28);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.82 0 0);
+  --radius: 0.75rem;
+
+  --mono-bg: #070707;
+  --mono-surface: #111111;
+  --mono-surface-strong: #181818;
+  --mono-text: #f5f5f7;
+  --mono-text-muted: #c5c5c7;
+  --mono-border: rgba(255, 255, 255, 0.14);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --background: oklch(0.12 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.16 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.16 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.97 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.22 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.75 0 0);
+  --accent: oklch(0.22 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.7 0.02 28);
+  --border: oklch(1 0 0 / 15%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.82 0 0);
 }
 
 @layer base {
@@ -82,8 +89,89 @@
   }
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+    background-image: none;
+    background-color: var(--mono-bg);
+    color: var(--mono-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   html {
     @apply font-sans;
+  }
+
+  ::selection {
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+  }
+}
+
+@layer components {
+  [class*="bg-gradient"],
+  [class*="bg-[radial-gradient"],
+  [class*="bg-[linear-gradient"],
+  [class*="from-"],
+  [class*="via-"],
+  [class*="to-"] {
+    background-image: none !important;
+  }
+
+  [class*="bg-[#"] {
+    background-color: var(--mono-surface) !important;
+  }
+
+  [class*="border-cyan"],
+  [class*="border-emerald"],
+  [class*="border-amber"],
+  [class*="border-indigo"],
+  [class*="border-violet"],
+  [class*="border-rose"],
+  [class*="border-blue"],
+  [class*="border-teal"],
+  [class*="border-lime"],
+  [class*="border-orange"],
+  [class*="border-yellow"],
+  [class*="border-white"] {
+    border-color: var(--mono-border) !important;
+  }
+
+  [class*="bg-cyan"],
+  [class*="bg-emerald"],
+  [class*="bg-amber"],
+  [class*="bg-indigo"],
+  [class*="bg-violet"],
+  [class*="bg-rose"],
+  [class*="bg-blue"],
+  [class*="bg-teal"],
+  [class*="bg-lime"],
+  [class*="bg-orange"],
+  [class*="bg-yellow"] {
+    background-color: var(--mono-surface-strong) !important;
+  }
+
+  [class*="text-cyan"],
+  [class*="text-emerald"],
+  [class*="text-amber"],
+  [class*="text-indigo"],
+  [class*="text-violet"],
+  [class*="text-rose"],
+  [class*="text-blue"],
+  [class*="text-teal"],
+  [class*="text-lime"],
+  [class*="text-orange"],
+  [class*="text-yellow"] {
+    color: var(--mono-text-muted) !important;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    transition:
+      background-color 180ms ease,
+      border-color 180ms ease,
+      color 180ms ease,
+      box-shadow 180ms ease;
   }
 }
