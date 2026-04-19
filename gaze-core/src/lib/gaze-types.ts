@@ -26,7 +26,7 @@ export type FacePoseSummary = GyroReading & {
 export type CalibrationPointPayload = {
   screen: ScreenPoint
   gaze: Vector3
-  facePoseBaseline: FacePoseSummary
+  facePoseBaseline?: FacePoseSummary | null
   gazeSampleCount: number
   faceSampleCount: number
   captureId: string

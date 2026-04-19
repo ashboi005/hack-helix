@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { GazeLiveOverlayProvider } from "@/components/gaze-live-overlay-provider";
+import { NotificationProvider } from "@/hooks/use-global-notifications";
 import "./globals.css";
+import { html } from "framer-motion/client";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,7 +30,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <GazeLiveOverlayProvider>{children}</GazeLiveOverlayProvider>
+        <NotificationProvider>
+          <GazeLiveOverlayProvider>{children}</GazeLiveOverlayProvider>
+        </NotificationProvider>
       </body>
     </html>
   );

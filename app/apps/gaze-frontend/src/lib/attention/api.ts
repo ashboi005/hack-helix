@@ -35,7 +35,7 @@ export type ExplainRereadRequest = {
 
 export type ExplainRereadResponse = { explanation: string }
 
-type CheckDistractionBackendBody = {
+export type CheckDistractionBackendBody = {
   docId: string
   fullPageBase64: string
   fullPagePageNumber: number
@@ -43,6 +43,8 @@ type CheckDistractionBackendBody = {
   pageNumbers: number[]
   recentCoordinates?: CheckDistractionRequest["recentCoordinates"]
 }
+
+
 
 export type CheckDistractionResponse = {
   genuine: boolean

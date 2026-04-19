@@ -392,18 +392,18 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
           quality: Math.min(1, Math.max(faceResult.summary.confidence, faceResult.summary.quality ?? 0)),
         }
 
+        // Never auto-set the neutral snapshot from a single calibration point.
+        // The neutral is either already set via the explicit /gyro-snapshot endpoint,
+        // or it will be computed on the frontend as the average of all calibration
+        // baselines once all points are captured.
         const existingNeutralSnapshot = gazeSessionStore.getNeutralSnapshot(claims.jti)
-        const neutralSnapshot = existingNeutralSnapshot ?? (payload.pointIndex === 0 ? faceResult.summary : null)
-        if (neutralSnapshot) {
-          gazeSessionStore.rememberNeutralSnapshot(claims.jti, neutralSnapshot)
-        }
 
         gazeMqttBridge.clearPendingCapture(claims.uuid, payload.captureId)
 
         return {
           captureId: payload.captureId,
           point,
-          neutralSnapshot,
+          neutralSnapshot: existingNeutralSnapshot ?? null,
         }
       } catch (error) {
         if (error instanceof GazeTokenError) {
@@ -553,18 +553,9 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
             return
           }
 
-          const neutralSnapshot = updatedSession.neutralSnapshot ?? updatedSession.calibration.neutralSnapshot ?? buildZeroGyroReading()
-          if (!updatedSession.neutralSnapshot) {
-            gazeSessionStore.initializeSession(ws.id, updatedSession.calibration, neutralSnapshot)
-          }
-
-          const currentGyro = gazeMqttBridge.latestReading(updatedSession.uuid) ?? buildZeroGyroReading()
-
           const solvedPoint = solveGazePoint({
             calibration: updatedSession.calibration,
             gazeVector: gazeVector.gazeVector,
-            zeroSnapshot: neutralSnapshot,
-            currentGyro,
             previousPoint: updatedSession.lastPoint
               ? { x: updatedSession.lastPoint.x, y: updatedSession.lastPoint.y }
               : null,
@@ -588,7 +579,6 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
               gyroDelta: solvedPoint.gyroDelta,
               compensatedGazeVector: solvedPoint.compensatedGazeVector,
               motionKind: solvedPoint.motionKind,
-              currentGyro,
             },
           })
           return

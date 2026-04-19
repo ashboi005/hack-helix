@@ -22,7 +22,7 @@ export type FacePoseSummary = GyroSnapshot & {
 export type WidgetCalibrationPoint = {
   screen: [number, number]
   gaze: [number, number, number]
-  facePoseBaseline: FacePoseSummary
+  facePoseBaseline?: FacePoseSummary | null
   gazeSampleCount: number
   faceSampleCount: number
   captureId: string
