@@ -34,6 +34,12 @@ const explainRereadBody = z.object({
   regionBase64: z.string().min(1),
 });
 
+const summariseLineBody = z.object({
+  docId: documentId,
+  pageNumber: z.number().int().positive(),
+  regionBase64: z.string().min(1),
+});
+
 const regionImageObject = z.object({
   imageBase64: z.string().min(1),
   pageNumber: z.number().int().positive(),
@@ -125,6 +131,34 @@ export const assistanceRoutes = new Elysia({ prefix: "/assistance", tags: ["Assi
       body: explainRereadBody,
       detail: {
         summary: "Explain text from a re-read document region",
+      },
+    },
+  )
+  .post(
+    "/summarise-line",
+    async ({ body, currentUser }) => {
+      const hydratedUser = await authService.ensureKnowledgeBaseForUser(currentUser.id, { strict: true });
+      const document = await documentsService.getOwnedDocument(body.docId, currentUser.id);
+      const kbId = requireKnowledgeBase(hydratedUser.kbId);
+      const ocrText = await extractTextFromRegion(body.regionBase64);
+
+      const prompt = `The user looked distracted while reading page ${body.pageNumber} of '${document.fileName}'. The OCR text from the specific line region is: ${JSON.stringify(ocrText)}. Summarize only this line/region in 1-2 concise sentences. Do not summarize the whole page.`;
+
+      const { answer, newChatId } = await fastQuery(kbId, document.autosageChatId, prompt);
+
+      if (newChatId) {
+        await documentsService.updateDocumentChatId(document.id, currentUser.id, newChatId);
+      }
+
+      return {
+        summary: answer,
+      };
+    },
+    {
+      auth: true,
+      body: summariseLineBody,
+      detail: {
+        summary: "Summarise a specific reread/distraction line region",
       },
     },
   )
