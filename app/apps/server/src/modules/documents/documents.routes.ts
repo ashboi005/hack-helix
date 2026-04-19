@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 
-import { authContextPlugin } from "@/modules/auth/auth.service";
+import { authContextPlugin, authService } from "@/modules/auth/auth.service";
 import { documentsService } from "./documents.service";
 
 const documentIdParams = t.Object({
@@ -27,7 +27,10 @@ export const documentRoutes = new Elysia({ prefix: "/documents", tags: ["Documen
   .use(authContextPlugin)
   .post(
     "/initiate-upload",
-    ({ body, currentUser }) => documentsService.initiateUpload(currentUser.id, currentUser.kbId, body),
+    async ({ body, currentUser }) => {
+      const hydratedUser = await authService.ensureKnowledgeBaseForUser(currentUser.id, { strict: true });
+      return documentsService.initiateUpload(hydratedUser.id, hydratedUser.kbId, body);
+    },
     {
       auth: true,
       body: initiateUploadBody,

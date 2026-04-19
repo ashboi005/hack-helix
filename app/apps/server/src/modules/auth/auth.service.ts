@@ -1,6 +1,6 @@
 import { auth } from "@app/auth";
 import { Elysia } from "elysia";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { users } from "@/db/schema";
@@ -118,6 +118,94 @@ async function getPublicUserById(userId: string): Promise<PublicUser> {
   return user;
 }
 
+function parseKnowledgeBaseProvisionFailureCause(error: unknown): Record<string, unknown> | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const details = Reflect.get(error, "details");
+  if (typeof details === "object" && details !== null) {
+    return details as Record<string, unknown>;
+  }
+
+  const directBody = Reflect.get(error, "body");
+  if (typeof directBody === "object" && directBody !== null) {
+    return directBody as Record<string, unknown>;
+  }
+
+  const directMessage = Reflect.get(error, "message");
+  if (typeof directMessage !== "string" || directMessage.trim().length === 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(directMessage);
+    if (typeof parsed === "object" && parsed !== null) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+async function ensureKnowledgeBaseForUser(
+  userId: string,
+  options?: { strict?: boolean },
+): Promise<PublicUser> {
+  const strict = options?.strict ?? true;
+  const existingUser = await getPublicUserById(userId);
+
+  if (existingUser.kbId) {
+    return existingUser;
+  }
+
+  let kbId: string;
+
+  try {
+    kbId = await createKnowledgeBase(userId, existingUser.name);
+  } catch (error) {
+    if (!strict) {
+      return existingUser;
+    }
+
+    if (error instanceof ApiError) {
+      const parsedCause = parseKnowledgeBaseProvisionFailureCause(error);
+
+      throw new ApiError(
+        502,
+        "knowledge_base_provision_failed",
+        "KNOWLEDGE_BASE_PROVISION_FAILED",
+        {
+          userId,
+          cause: error.code,
+          ...(parsedCause ? { autosage: parsedCause } : {}),
+        },
+      );
+    }
+
+    const parsedCause = parseKnowledgeBaseProvisionFailureCause(error);
+
+    throw new ApiError(502, "knowledge_base_provision_failed", "KNOWLEDGE_BASE_PROVISION_FAILED", {
+      userId,
+      ...(parsedCause ? { autosage: parsedCause } : {}),
+    });
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({ kbId })
+    .where(and(eq(users.id, userId), isNull(users.kbId)))
+    .returning(publicUserSelection);
+
+  if (updatedUser) {
+    return updatedUser;
+  }
+
+  return getPublicUserById(userId);
+}
+
 async function deleteUserById(userId: string): Promise<void> {
   await db.delete(users).where(eq(users.id, userId));
 }
@@ -139,17 +227,7 @@ async function signUp(credentials: Required<AuthCredentials>, headers: Headers):
   }
 
   try {
-    const kbId = await createKnowledgeBase(result.user.id);
-
-    const [updatedUser] = await db
-      .update(users)
-      .set({ kbId })
-      .where(eq(users.id, result.user.id))
-      .returning(publicUserSelection);
-
-    if (!updatedUser) {
-      throw new ApiError(500, "user_not_found", "USER_NOT_FOUND");
-    }
+    const updatedUser = await ensureKnowledgeBaseForUser(result.user.id, { strict: true });
 
     return {
       token: result.token,
@@ -187,7 +265,7 @@ async function signIn(credentials: AuthCredentials, headers: Headers): Promise<{
 
   return {
     token: result.token,
-    user: await getPublicUserById(result.user.id),
+    user: await ensureKnowledgeBaseForUser(result.user.id, { strict: true }),
   };
 }
 
@@ -220,6 +298,7 @@ async function getCurrentUser(headers: Headers): Promise<PublicUser> {
 }
 
 export const authService = {
+  ensureKnowledgeBaseForUser,
   getCurrentUser,
   getPublicUserById,
   getSession,

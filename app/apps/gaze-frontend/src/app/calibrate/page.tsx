@@ -222,7 +222,7 @@ export default function CalibratePage() {
       {session && (
         <div className="fixed bottom-6 right-6 z-50">
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => router.push("/pdf")}
             className="rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-lg hover:bg-primary/90"
           >
             Calibration Done →

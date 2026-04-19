@@ -69,11 +69,21 @@ async function autosageRequest(path: string, body: unknown): Promise<unknown> {
   return payload;
 }
 
-export async function createKnowledgeBase(userId: string): Promise<string> {
+function buildKnowledgeBaseName(userId: string, userName?: string | null): string {
+  const normalizedName = (userName ?? "").trim().replace(/\s+/g, " ");
+  const fallback = `user-${userId.slice(0, 8)}`;
+  const base = normalizedName.length > 0 ? normalizedName : fallback;
+  const withSuffix = `${base} (${userId.slice(0, 8)})`;
+  return withSuffix.length > 255 ? withSuffix.slice(0, 255) : withSuffix;
+}
+
+export async function createKnowledgeBase(userId: string, userName?: string | null): Promise<string> {
+  const kbName = buildKnowledgeBaseName(userId, userName);
+
   const payload = await autosageRequest("/api/v1/knowledge-bases/", {
-    tenant_id: env.AUTOSAGE_TENANT_ID,
-    name: `kb-${userId}`,
-    description: `Knowledge base for user ${userId}`,
+    tenant_id: env.AUTOSAGE_TENANT_ID.trim(),
+    name: kbName,
+    description: `Knowledge base for ${kbName}`,
     persona: "",
     customPrompt: "",
   });
@@ -81,6 +91,8 @@ export async function createKnowledgeBase(userId: string): Promise<string> {
   const kbId = getFirstString(payload, [
     ["id"],
     ["data", "id"],
+    ["knowledgeBase", "id"],
+    ["data", "knowledgeBase", "id"],
     ["knowledge_base_id"],
     ["data", "knowledge_base_id"],
     ["kb_id"],
@@ -104,7 +116,7 @@ export async function getPresignForDocument(
 ): Promise<AutosagePresignResult> {
   const payload = await autosageRequest("/api/v1/documents/presign", {
     kb_id: kbId,
-    tenant_id: env.AUTOSAGE_TENANT_ID,
+    tenant_id: env.AUTOSAGE_TENANT_ID.trim(),
     filename: fileName,
     mime_type: "application/pdf",
     size_bytes: sizeBytes,
@@ -113,8 +125,12 @@ export async function getPresignForDocument(
   const presignedUrl = getFirstString(payload, [
     ["presigned_url"],
     ["presignedUrl"],
+    ["upload_url"],
+    ["uploadUrl"],
     ["data", "presigned_url"],
     ["data", "presignedUrl"],
+    ["data", "upload_url"],
+    ["data", "uploadUrl"],
   ]);
 
   if (!presignedUrl) {
@@ -129,8 +145,12 @@ export async function getPresignForDocument(
     autosageDocumentId: getFirstString(payload, [
       ["doc_id"],
       ["docId"],
+      ["document_id"],
+      ["documentId"],
       ["data", "doc_id"],
       ["data", "docId"],
+      ["data", "document_id"],
+      ["data", "documentId"],
     ]),
   };
 }

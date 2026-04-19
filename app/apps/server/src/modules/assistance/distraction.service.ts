@@ -14,13 +14,18 @@ const distractionResultSchema = z.object({
 export async function classifyDistraction(
   fullPageBase64: string,
   regionImages: string[],
+  recentCoordinates?: Array<{ x: number; y: number; ts: number; source?: "eye" | "cursor"; pageNumber?: number }>,
 ): Promise<z.infer<typeof distractionResultSchema>> {
   try {
+    const coordinateText = recentCoordinates?.length
+      ? `Recent coordinates for the last 15 seconds are provided as JSON. Use movement coherence to support your judgment: ${JSON.stringify(recentCoordinates)}`
+      : "No recent coordinate trace was provided. Judge only by images.";
+
     const content = [
       {
         type: "text" as const,
         text:
-          "The first image is the full page. The following images are the page regions where the user's gaze repeatedly landed. If any repeated region shows diagrams, charts, tables, figures, images, or code blocks, return genuine=true because it is a valid visual reference pattern. If all repeated regions are continuous prose text with no meaningful visual structure, return genuine=false because the pattern is likely distraction. Respond with a one-sentence reason.",
+          `The first image is the full page. The following images are the page regions where the user's gaze repeatedly landed. If any repeated region shows diagrams, charts, tables, figures, images, or code blocks, return genuine=true because it is a valid visual reference pattern. If all repeated regions are continuous prose text with no meaningful visual structure, return genuine=false because the pattern is likely distraction. ${coordinateText} Respond with a one-sentence reason.`,
       },
       {
         type: "image" as const,

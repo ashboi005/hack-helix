@@ -20,7 +20,7 @@ export default function LoginPage() {
   const { data: session, isPending, refetch } = useSession()
 
   const rawNext = searchParams.get("next")?.trim()
-  const redirectTarget = rawNext && rawNext.startsWith("/") ? rawNext : "/dashboard"
+  const redirectTarget = rawNext && rawNext.startsWith("/") ? rawNext : "/pdf"
 
   const [mode, setMode] = useState<AuthMode>("login")
   const [email, setEmail] = useState("")
@@ -42,7 +42,7 @@ export default function LoginPage() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
         <section className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center justify-center px-6 py-8 sm:px-8 lg:px-10">
           <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#070e1a]/90 p-6 text-sm text-zinc-300 shadow-[0_25px_40px_-28px_rgba(0,0,0,0.95)] sm:p-8">
-            Redirecting to your dashboard...
+            Redirecting to your PDF workspace...
           </div>
         </section>
       </main>
