@@ -125,7 +125,14 @@ export async function summariseDocument(input: SummariseRequest): Promise<Summar
     body: JSON.stringify(input),
   })
 
-  return parseJsonResponse<SummariseResponse>(response, "Unable to fetch summary")
+  const payload = await parseJsonResponse<unknown>(response, "Unable to fetch summary")
+  const summary = extractStringField(payload, ["summary", "data.summary", "result.summary"])
+
+  if (!summary) {
+    throw new Error("Summary response was empty")
+  }
+
+  return { summary }
 }
 
 export async function summariseLine(input: SummariseLineRequest): Promise<SummariseLineResponse> {
@@ -138,7 +145,14 @@ export async function summariseLine(input: SummariseLineRequest): Promise<Summar
     body: JSON.stringify(input),
   })
 
-  return parseJsonResponse<SummariseLineResponse>(response, "Unable to summarise line")
+  const payload = await parseJsonResponse<unknown>(response, "Unable to summarise line")
+  const summary = extractStringField(payload, ["summary", "data.summary", "result.summary"])
+
+  if (!summary) {
+    throw new Error("Line summary response was empty")
+  }
+
+  return { summary }
 }
 
 export function buildSummariseRequest(docId: string, options?: { pageNumbers?: number[] }): SummariseRequest {
@@ -323,7 +337,33 @@ async function parseJsonResponse<T>(response: Response, fallbackMessage: string)
     throw new Error(message)
   }
 
+  if (payload === null) {
+    throw new Error(`${fallbackMessage}: empty response body`)
+  }
+
   return payload as T
+}
+
+function extractStringField(payload: unknown, keys: string[]): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  for (const keyPath of keys) {
+    const value = keyPath.split(".").reduce<unknown>((current, key) => {
+      if (typeof current !== "object" || current === null) {
+        return undefined
+      }
+
+      return Reflect.get(current, key)
+    }, payload)
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+
+  return null
 }
 
 function extractErrorMessage(payload: unknown, fallbackMessage: string): string {
