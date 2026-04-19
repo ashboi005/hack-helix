@@ -13,6 +13,29 @@ function getBackendBaseUrl(): string {
   return value.endsWith("/") ? value.slice(0, -1) : value
 }
 
+function validateBackendBaseUrl(rawUrl: string): { ok: true; normalized: string } | { ok: false; reason: string } {
+  try {
+    const parsed = new URL(rawUrl)
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return {
+        ok: false,
+        reason: "APP_BACKEND_URL must use http:// or https://",
+      }
+    }
+
+    return {
+      ok: true,
+      normalized: rawUrl,
+    }
+  } catch {
+    return {
+      ok: false,
+      reason: "APP_BACKEND_URL is not a valid absolute URL",
+    }
+  }
+}
+
 function buildUpstreamUrl(request: NextRequest, pathSegments: string[]): string {
   const backendBaseUrl = getBackendBaseUrl()
   const pathname = pathSegments.length > 0 ? pathSegments.join("/") : ""
@@ -22,6 +45,23 @@ function buildUpstreamUrl(request: NextRequest, pathSegments: string[]): string 
 }
 
 async function proxyAuthRequest(request: NextRequest, pathSegments: string[]): Promise<Response> {
+  const backendBaseUrl = getBackendBaseUrl()
+  const validation = validateBackendBaseUrl(backendBaseUrl)
+
+  if (!validation.ok) {
+    return Response.json(
+      {
+        error: "frontend_auth_proxy_misconfigured",
+        code: "FRONTEND_AUTH_PROXY_MISCONFIGURED",
+        details: {
+          reason: validation.reason,
+          backendBaseUrl,
+        },
+      },
+      { status: 500 },
+    )
+  }
+
   const url = buildUpstreamUrl(request, pathSegments)
   const headers = new Headers(request.headers)
 
@@ -31,12 +71,31 @@ async function proxyAuthRequest(request: NextRequest, pathSegments: string[]): P
   const hasBody = request.method !== "GET" && request.method !== "HEAD"
   const body = hasBody ? await request.arrayBuffer() : undefined
 
-  const upstreamResponse = await fetch(url, {
-    method: request.method,
-    headers,
-    body,
-    redirect: "manual",
-  })
+  let upstreamResponse: Response
+
+  try {
+    upstreamResponse = await fetch(url, {
+      method: request.method,
+      headers,
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(15000),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown upstream connection error"
+
+    return Response.json(
+      {
+        error: "backend_unreachable",
+        code: "BACKEND_UNREACHABLE",
+        details: {
+          backendUrl: url,
+          message,
+        },
+      },
+      { status: 502 },
+    )
+  }
 
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
