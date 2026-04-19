@@ -22,6 +22,7 @@ export type DetectionMetrics = {
   erraticRatio: number
   verticalSweepRatio: number
   meanAbsDy: number
+  netVerticalProgress: number
   scrollVelocity: number
 }
 

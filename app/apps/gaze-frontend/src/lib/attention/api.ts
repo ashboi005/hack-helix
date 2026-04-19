@@ -1,6 +1,6 @@
 import { getGazeCoreDemoConfig } from "@/lib/gaze/gaze-core-demo-config"
 
-import type { CheckDistractionRequest, RegionImagePayload } from "./types"
+import type { AttentionMode, CheckDistractionRequest, RegionImagePayload } from "./types"
 
 const ACTIVE_DOC_KEY = "focuslayer-active-document-id"
 
@@ -12,6 +12,36 @@ type InitiateUploadBody = {
 type InitiateUploadResponse = {
   presignedUrl: string
   documentId: string
+}
+
+export type SummariseRequest = { docId: string; scope: "full" } | { docId: string; scope: "partial"; pageNumbers: number[] }
+export type SummariseResponse = { summary: string }
+
+export type ExplainRereadRequest = {
+  docId: string
+  pageNumber: number
+  regionBase64: string
+}
+
+export type ExplainRereadResponse = { explanation: string }
+
+type CheckDistractionBackendBody = {
+  docId: string
+  fullPageBase64: string
+  regionImages: string[]
+  pageNumbers: number[]
+}
+
+export type CheckDistractionResponse = {
+  genuine: boolean
+  reason: string
+  pageNumbers: number[]
+}
+
+export type AssistancePromptAction = {
+  id: "summarise" | "explain-reread" | "check-distraction"
+  label: string
+  description: string
 }
 
 export type DocumentSummary = {
@@ -66,8 +96,12 @@ export async function getDocument(id: string): Promise<DocumentSummary> {
 }
 
 export async function requestSummary(
-  input: { docId: string; scope: "full" } | { docId: string; scope: "partial"; pageNumbers: number[] },
-): Promise<{ summary: string }> {
+  input: SummariseRequest,
+): Promise<SummariseResponse> {
+  return summariseDocument(input)
+}
+
+export async function summariseDocument(input: SummariseRequest): Promise<SummariseResponse> {
   const response = await fetch(buildUrl("/assistance/summarise"), {
     method: "POST",
     headers: {
@@ -77,10 +111,31 @@ export async function requestSummary(
     body: JSON.stringify(input),
   })
 
-  return parseJsonResponse<{ summary: string }>(response, "Unable to fetch summary")
+  return parseJsonResponse<SummariseResponse>(response, "Unable to fetch summary")
 }
 
-export async function explainReread(input: { docId: string; pageNumber: number; regionBase64: string }): Promise<{ explanation: string }> {
+export function buildSummariseRequest(docId: string, options?: { pageNumbers?: number[] }): SummariseRequest {
+  const pages = normalizePageNumbers(options?.pageNumbers ?? [])
+
+  if (pages.length === 0) {
+    return {
+      docId,
+      scope: "full",
+    }
+  }
+
+  return {
+    docId,
+    scope: "partial",
+    pageNumbers: pages,
+  }
+}
+
+export async function explainReread(input: ExplainRereadRequest): Promise<ExplainRereadResponse> {
+  return explainRereadRegion(input)
+}
+
+export async function explainRereadRegion(input: ExplainRereadRequest): Promise<ExplainRereadResponse> {
   const response = await fetch(buildUrl("/assistance/explain-reread"), {
     method: "POST",
     headers: {
@@ -90,25 +145,59 @@ export async function explainReread(input: { docId: string; pageNumber: number; 
     body: JSON.stringify(input),
   })
 
-  return parseJsonResponse<{ explanation: string }>(response, "Unable to explain section")
+  return parseJsonResponse<ExplainRereadResponse>(response, "Unable to explain section")
 }
 
 export async function checkDistraction(
   input: CheckDistractionRequest,
-): Promise<{ genuine: boolean; reason: string; pageNumbers: number[] }> {
+): Promise<CheckDistractionResponse> {
+  const body = buildCheckDistractionBody(input)
+
   const response = await fetch(buildUrl("/assistance/check-distraction"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     credentials: "include",
-    body: JSON.stringify(input),
+    body: JSON.stringify(body),
   })
 
-  return parseJsonResponse<{ genuine: boolean; reason: string; pageNumbers: number[] }>(
+  return parseJsonResponse<CheckDistractionResponse>(
     response,
     "Unable to check distraction",
   )
+}
+
+export function getAssistancePromptActions(mode: AttentionMode): AssistancePromptAction[] {
+  switch (mode) {
+    case "scanning":
+      return [
+        {
+          id: "summarise",
+          label: "Summarise this section",
+          description: "Get a fast summary of the current page range to reduce overload.",
+        },
+      ]
+    case "rereading":
+      return [
+        {
+          id: "explain-reread",
+          label: "Explain this region",
+          description: "Send the cropped region image for OCR + a clearer explanation.",
+        },
+      ]
+    case "distraction":
+      return [
+        {
+          id: "check-distraction",
+          label: "Check distraction pattern",
+          description: "Classify whether gaze jumps are genuine visual reference or drift.",
+        },
+      ]
+    case "reading":
+    default:
+      return []
+  }
 }
 
 export function setActiveDocumentId(id: string) {
@@ -123,6 +212,40 @@ export function getActiveDocumentId(): string | null {
 
 export function mapRegionPayload(images: RegionImagePayload[]): RegionImagePayload[] {
   return images.slice(0, 5)
+}
+
+function buildCheckDistractionBody(input: CheckDistractionRequest): CheckDistractionBackendBody {
+  const pageNumbers = normalizePageNumbers([input.fullPagePageNumber, ...input.pageNumbers])
+
+  const regionImages = input.regionImages
+    .map((region) => region.imageBase64)
+    .filter((image) => image.trim().length > 0)
+    .slice(0, 4)
+
+  if (regionImages.length < 2) {
+    throw new Error("At least 2 region images are required for distraction check")
+  }
+
+  return {
+    docId: input.docId,
+    fullPageBase64: input.fullPageBase64,
+    regionImages,
+    pageNumbers: pageNumbers.length ? pageNumbers : [input.fullPagePageNumber],
+  }
+}
+
+function normalizePageNumbers(pageNumbers: number[]): number[] {
+  const unique = new Set<number>()
+
+  for (const page of pageNumbers) {
+    if (!Number.isFinite(page)) continue
+    const normalized = Math.floor(page)
+    if (normalized > 0) {
+      unique.add(normalized)
+    }
+  }
+
+  return [...unique]
 }
 
 function buildUrl(path: string): string {

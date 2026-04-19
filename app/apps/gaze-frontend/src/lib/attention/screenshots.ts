@@ -5,6 +5,10 @@ export function canvasToBase64(canvas: HTMLCanvasElement): string {
   return stripDataUrlPrefix(dataUrl)
 }
 
+/**
+ * Build region screenshots by picking the top-N highest-deflection points
+ * from the coordinate history and cropping around them.
+ */
 export function buildRegionScreenshots(
   canvas: HTMLCanvasElement,
   coordinates: CoordinateSample[],
@@ -22,6 +26,78 @@ export function buildRegionScreenshots(
       pageNumber: targetPageNumber,
     }
   })
+}
+
+/**
+ * Build screenshots specifically for erratic gaze jumps.
+ *
+ * For each of the largest jumps we capture TWO crops:
+ *   1. The "from" point (where the gaze was before the jump)
+ *   2. The "to"   point (where the gaze landed after the jump)
+ *
+ * This gives the backend both sides of the context so it can judge whether
+ * the person was genuinely referencing another part of the page or drifting.
+ *
+ * Returns up to `maxJumps * 2` region images (default 4 = 2 jumps × 2 sides).
+ */
+export function buildErraticJumpScreenshots(
+  canvas: HTMLCanvasElement,
+  coordinates: CoordinateSample[],
+  targetPageNumber: number,
+  maxJumps = 2,
+): RegionImagePayload[] {
+  if (coordinates.length < 2) return []
+
+  // Score each consecutive pair by jump distance
+  const jumps: Array<{ from: CoordinateSample; to: CoordinateSample; dist: number }> = []
+
+  for (let i = 1; i < coordinates.length; i += 1) {
+    const from = coordinates[i - 1]
+    const to = coordinates[i]
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (dist > 30) {
+      // Only consider actual big jumps
+      jumps.push({ from, to, dist })
+    }
+  }
+
+  // Sort by largest distance first
+  jumps.sort((a, b) => b.dist - a.dist)
+
+  // Deduplicate — skip jumps whose endpoints are too close to already-picked ones
+  const picked: Array<{ from: CoordinateSample; to: CoordinateSample }> = []
+  for (const jump of jumps) {
+    if (picked.length >= maxJumps) break
+
+    const tooClose = picked.some(
+      (existing) =>
+        Math.hypot(existing.from.x - jump.from.x, existing.from.y - jump.from.y) < 60 ||
+        Math.hypot(existing.to.x - jump.to.x, existing.to.y - jump.to.y) < 60,
+    )
+    if (!tooClose) {
+      picked.push({ from: jump.from, to: jump.to })
+    }
+  }
+
+  // Build region images: from-crop, then to-crop for each jump
+  const regions: RegionImagePayload[] = []
+  for (const jump of picked) {
+    const fromCrop = cropAroundPoint(canvas, jump.from.x, jump.from.y)
+    regions.push({
+      imageBase64: canvasToBase64(fromCrop),
+      pageNumber: jump.from.pageNumber ?? targetPageNumber,
+    })
+
+    const toCrop = cropAroundPoint(canvas, jump.to.x, jump.to.y)
+    regions.push({
+      imageBase64: canvasToBase64(toCrop),
+      pageNumber: jump.to.pageNumber ?? targetPageNumber,
+    })
+  }
+
+  return regions
 }
 
 export function cropRegionAtPointBase64(canvas: HTMLCanvasElement, x: number, y: number): string {

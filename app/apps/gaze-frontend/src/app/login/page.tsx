@@ -202,7 +202,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={busy || isPending || !email.trim() || !password.trim() || (mode === "signup" && !name.trim())}
+              disabled={busy || isPending}
               className="mt-2 inline-flex h-10 items-center justify-center rounded-md bg-amber-300 px-4 text-sm font-semibold text-[#111827] transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? (mode === "login" ? "Signing In..." : "Creating Account...") : (mode === "login" ? "Login" : "Signup")}
