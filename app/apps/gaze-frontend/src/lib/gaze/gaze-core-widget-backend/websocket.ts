@@ -19,6 +19,16 @@ export async function connectLivePreviewSocket(input: {
   timeoutMs?: number
 }) {
   const url = new URL(input.socketUrl)
+  const pageIsHttps = typeof window !== "undefined" && window.location.protocol === "https:"
+
+  if (pageIsHttps && url.protocol === "ws:") {
+    url.protocol = "wss:"
+  }
+
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    url.protocol = pageIsHttps || url.protocol === "https:" ? "wss:" : "ws:"
+  }
+
   url.searchParams.set("token", input.token)
 
   return await new Promise<WebSocket>((resolve, reject) => {
