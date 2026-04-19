@@ -463,7 +463,16 @@ export default function PdfPage() {
             docId: activeDocId,
             scope: "full",
           })
-          setSummaryText(response.summary)
+          const summary =
+            response && typeof response === "object" && typeof Reflect.get(response, "summary") === "string"
+              ? String(Reflect.get(response, "summary")).trim()
+              : ""
+
+          if (!summary) {
+            throw new Error("Summary response was empty")
+          }
+
+          setSummaryText(summary)
           setDistractionText("Distraction prompt accepted. Generated a summary for the whole PDF.")
           setStatus("Full PDF summary generated")
           return
