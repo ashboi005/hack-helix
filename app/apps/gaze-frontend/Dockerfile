@@ -21,6 +21,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/apps/gaze-frontend/package.json ./package.json
+COPY --from=build /app/apps/gaze-frontend/node_modules ./node_modules
 COPY --from=build /app/apps/gaze-frontend/.next ./.next
 COPY --from=build /app/apps/gaze-frontend/public ./public
 COPY --from=build /app/apps/gaze-frontend/next.config.ts ./next.config.ts

@@ -19,6 +19,7 @@ ENV PORT=3000
 
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/apps/server/package.json ./package.json
+COPY --from=build /app/apps/server/node_modules ./node_modules
 COPY --from=build /app/apps/server/dist ./dist
 
 EXPOSE 3000

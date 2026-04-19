@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { Suspense, useEffect, useState, type FormEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Space_Grotesk } from "next/font/google"
 
@@ -15,6 +15,14 @@ const spaceGrotesk = Space_Grotesk({
 type AuthMode = "login" | "signup"
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
+  )
+}
+
+function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { data: session, isPending, refetch } = useSession()
