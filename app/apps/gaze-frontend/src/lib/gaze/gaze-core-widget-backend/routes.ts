@@ -38,8 +38,17 @@ export function buildCalibrationRecordCompleteRouteUrl(baseUrl?: string) {
   return buildRouteUrl(baseUrl, "/eye/calibration/record/complete")
 }
 
+// Upgrade ws:// → wss:// when the page is on HTTPS (handles TLS-terminating
+// reverse proxies that return plain ws:// URLs from the backend).
+function upgradeToSecureWs(wsUrl: string): string {
+  if (typeof window !== "undefined" && window.location.protocol === "https:") {
+    return wsUrl.replace(/^ws:\/\//i, "wss://")
+  }
+  return wsUrl
+}
+
 export function buildLivePreviewSocketUrl(baseUrl?: string, overrideSocketUrl?: string) {
-  if (overrideSocketUrl?.trim()) return overrideSocketUrl.trim()
+  if (overrideSocketUrl?.trim()) return upgradeToSecureWs(overrideSocketUrl.trim())
 
   const normalizedBaseUrl = normalizeBackendBaseUrl(baseUrl)
 
@@ -53,13 +62,7 @@ export function buildLivePreviewSocketUrl(baseUrl?: string, overrideSocketUrl?: 
   }
 
   const url = new URL("/api/gaze/screen/ws", `${normalizedBaseUrl}/`)
-  // Upgrade ws/wss to match the security level of the current page: if the
-  // page is on HTTPS always use wss:// regardless of what the backend URL says.
   const pageIsHttps = typeof window !== "undefined" && window.location.protocol === "https:"
-  if (pageIsHttps) {
-    url.protocol = "wss:"
-  } else {
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  }
+  url.protocol = pageIsHttps || url.protocol === "https:" ? "wss:" : "ws:"
   return url.toString()
 }

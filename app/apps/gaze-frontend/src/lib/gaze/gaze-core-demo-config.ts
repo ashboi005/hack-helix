@@ -1,5 +1,4 @@
 const DEFAULT_APP_BACKEND_BASE_URL = "/api/backend"
-const DEFAULT_GAZE_CORE_BACKEND_BASE_URL = "http://localhost:3001"
 
 export function getGazeCoreDemoConfig() {
   const appBackendBaseUrl = DEFAULT_APP_BACKEND_BASE_URL
@@ -8,7 +7,8 @@ export function getGazeCoreDemoConfig() {
     appBackendBaseUrl,
     // Keep backward compatibility with existing callsites while routing auth/setup to the app backend.
     backendBaseUrl: appBackendBaseUrl,
-    gazeCoreBackendBaseUrl: process.env.NEXT_PUBLIC_GAZECORE_BACKEND_URL ?? DEFAULT_GAZE_CORE_BACKEND_BASE_URL,
+    // Falls back to undefined so buildLivePreviewSocketUrl uses window.location.origin (always correct on prod).
+    gazeCoreBackendBaseUrl: process.env.NEXT_PUBLIC_GAZECORE_BACKEND_URL || undefined,
     apiKey: process.env.GAZE_API_KEY,
     deviceUuid: process.env.NEXT_PUBLIC_GAZECORE_DEVICE_UUID,
     email: process.env.NEXT_PUBLIC_GAZECORE_TEST_EMAIL,
