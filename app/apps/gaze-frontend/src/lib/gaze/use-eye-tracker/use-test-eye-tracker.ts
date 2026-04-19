@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
-import { gazeVector, type GazeSession, type GazeTrackingInput, type GazeVectorReturn } from "@/lib/gaze-core"
+import { gazeVector, type GazeSession, type GazeTrackingInput, type GazeVectorReturn } from "@/lib/gaze/gaze-core"
 import {
   type TestCalibrationData,
   type TestCalibrationPoint,
@@ -51,6 +51,13 @@ export function useTestEyeTracker() {
   const [latestResult, setLatestResult] = useState<LiveResult | null>(null)
   const [calibrationResult, setCalibrationResult] = useState<TestCalibrationResult>({
     data: savedCalibration,
+    record: savedCalibration
+      ? {
+        calibration: savedCalibration,
+        neutralSnapshot: savedCalibration.neutralSnapshot ?? savedCalibration.points[0]?.facePoseBaseline ?? null,
+      }
+      : null,
+    neutralSnapshot: savedCalibration?.neutralSnapshot ?? savedCalibration?.points[0]?.facePoseBaseline ?? null,
     rawJson: savedCalibration ? JSON.stringify(savedCalibration, null, 2) : "",
   })
 
@@ -234,7 +241,7 @@ export function useTestEyeTracker() {
       closePreview()
       setPreviewError("")
 
-      const session = gazeVector(buildTrackingInput(), (result) => {
+      const session = gazeVector(buildTrackingInput(), (result: GazeVectorReturn) => {
         frameStateRef.current = {
           gazeData: toPreviewGazeData(result),
           thresholdMask: result.iPupilDetectionReturn.thresholdPreview,
@@ -465,23 +472,50 @@ export function useTestEyeTracker() {
       if (!mostCommonVector) return
 
       const point = calibrationGrid[calibIndex]
+      const fallbackTimestamp = Date.now()
       savedPointsRef.current.push({
         screen: point,
         gaze: mostCommonVector,
-        sampleCount: samples.length,
+        facePoseBaseline: {
+          x: 0,
+          y: 0,
+          z: 0,
+          yaw: 0,
+          pitch: 0,
+          roll: 0,
+          timestamp: fallbackTimestamp,
+          source: "legacy-preview",
+          kind: "legacy-gyro",
+          sampleCount: 0,
+          startedAt: fallbackTimestamp,
+          endedAt: fallbackTimestamp,
+          confidence: 0,
+          quality: 0,
+        },
+        gazeSampleCount: samples.length,
+        faceSampleCount: 0,
+        captureId: `legacy-preview-${calibIndex}`,
+        capturedAt: fallbackTimestamp,
+        quality: 0,
       })
 
       const nextIndex = calibIndex + 1
       if (nextIndex >= calibrationGrid.length) {
         const data: TestCalibrationData = {
-          version: 1,
+          version: 2,
           createdAt: Date.now(),
           screen: { width: window.innerWidth, height: window.innerHeight },
           points: savedPointsRef.current,
+          neutralSnapshot: savedPointsRef.current[0]?.facePoseBaseline ?? null,
         }
         testEyeTrackerStorage.writeCalibration(data)
         setCalibrationResult({
           data,
+          record: {
+            calibration: data,
+            neutralSnapshot: data.neutralSnapshot ?? null,
+          },
+          neutralSnapshot: data.neutralSnapshot ?? null,
           rawJson: JSON.stringify(data, null, 2),
         })
         stopCalibration()
@@ -493,7 +527,7 @@ export function useTestEyeTracker() {
   }
 
   function clearCalibration() {
-    setCalibrationResult({ data: null, rawJson: "" })
+    setCalibrationResult({ data: null, record: null, neutralSnapshot: null, rawJson: "" })
     localStorage.removeItem("gaze-core-test-calibration")
   }
 

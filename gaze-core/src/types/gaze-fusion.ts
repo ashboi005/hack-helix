@@ -11,6 +11,15 @@ export type GyroScale = {
   pixelsPerRollDegree: number;
 };
 
+export type MotionDelta = {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  roll: number;
+};
+
 export type SolveGazePointInput = {
   calibration: CalibrationPayload;
   gazeVector: Vector3;

@@ -1,4 +1,4 @@
-import type { GyroSnapshot } from "./gaze-core-widget-backend/types"
+import type { GyroSnapshot, WidgetCalibrationPoint } from "./gaze-core-widget-backend/types"
 
 const KEYS = {
   prefs: "gaze-core-test-tracker-prefs",
@@ -19,22 +19,32 @@ export type TestSetupPrefs = {
   }
 }
 
-export type TestCalibrationPoint = {
-  screen: [number, number]
-  gaze: [number, number, number]
-  sampleCount: number
-}
+export type TestCalibrationPoint = WidgetCalibrationPoint
 
 export type TestCalibrationData = {
   version: number
   createdAt: number
   screen: { width: number; height: number }
   points: TestCalibrationPoint[]
+  neutralSnapshot?: GyroSnapshot | null
 }
 
 export type TestCalibrationRecord = {
   calibration: TestCalibrationData
-  gyroZeroSnapshot: GyroSnapshot | null
+  neutralSnapshot: GyroSnapshot | null
+}
+
+type LegacyCalibrationPoint = {
+  screen: [number, number]
+  gaze: [number, number, number]
+  sampleCount: number
+}
+
+type LegacyCalibrationData = {
+  version: number
+  createdAt: number
+  screen: { width: number; height: number }
+  points: LegacyCalibrationPoint[]
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -54,25 +64,93 @@ function removeJson(key: string): void {
   localStorage.removeItem(key)
 }
 
+function toFallbackSnapshot(): GyroSnapshot {
+  return {
+    x: 0,
+    y: 0,
+    z: 0,
+    yaw: 0,
+    pitch: 0,
+    roll: 0,
+    timestamp: Date.now(),
+    source: "legacy-fallback",
+    kind: "legacy-gyro",
+  }
+}
+
+function normalizeLegacyPoint(point: LegacyCalibrationPoint, index: number): TestCalibrationPoint {
+  const fallbackSnapshot = toFallbackSnapshot()
+  return {
+    screen: point.screen,
+    gaze: point.gaze,
+    facePoseBaseline: {
+      ...fallbackSnapshot,
+      sampleCount: Math.max(1, point.sampleCount),
+      startedAt: fallbackSnapshot.timestamp,
+      endedAt: fallbackSnapshot.timestamp,
+      confidence: 0,
+      quality: 0,
+    },
+    gazeSampleCount: Math.max(1, point.sampleCount),
+    faceSampleCount: 0,
+    captureId: `legacy-${index}`,
+    capturedAt: fallbackSnapshot.timestamp,
+    quality: 0,
+  }
+}
+
 function normalizeCalibrationRecord(raw: unknown): TestCalibrationRecord | null {
   if (!raw || typeof raw !== "object") return null
 
   const record = raw as Record<string, unknown>
   if ("calibration" in record && record.calibration && typeof record.calibration === "object") {
+    const calibration = record.calibration as TestCalibrationData
+    const neutralSnapshot = (record.neutralSnapshot as GyroSnapshot | null | undefined)
+      ?? (record.gyroZeroSnapshot as GyroSnapshot | null | undefined)
+      ?? calibration.neutralSnapshot
+      ?? calibration.points[0]?.facePoseBaseline
+      ?? null
+
     return {
-      calibration: record.calibration as TestCalibrationData,
-      gyroZeroSnapshot: (record.gyroZeroSnapshot as GyroSnapshot | null | undefined) ?? null,
+      calibration: {
+        ...calibration,
+        version: calibration.version >= 2 ? calibration.version : 2,
+        neutralSnapshot,
+        points: calibration.points,
+      },
+      neutralSnapshot,
     }
   }
 
   if ("points" in record) {
+    const calibration = record as LegacyCalibrationData
+    const points = calibration.points.map(normalizeLegacyPoint)
+    const neutralSnapshot = points[0]?.facePoseBaseline ?? null
+
     return {
-      calibration: record as TestCalibrationData,
-      gyroZeroSnapshot: null,
+      calibration: {
+        version: 2,
+        createdAt: calibration.createdAt,
+        screen: calibration.screen,
+        points,
+        neutralSnapshot,
+      },
+      neutralSnapshot,
     }
   }
 
   return null
+}
+
+function buildRecordFromCalibration(calibration: TestCalibrationData): TestCalibrationRecord {
+  const neutralSnapshot = calibration.neutralSnapshot ?? calibration.points[0]?.facePoseBaseline ?? null
+  return {
+    calibration: {
+      ...calibration,
+      neutralSnapshot,
+    },
+    neutralSnapshot,
+  }
 }
 
 export function defaultTestPrefs(): TestSetupPrefs {
@@ -89,6 +167,12 @@ export const testEyeTrackerStorage = {
   readPrefs: () => readJson<TestSetupPrefs>(KEYS.prefs, defaultTestPrefs()),
   writePrefs: (prefs: TestSetupPrefs) => writeJson(KEYS.prefs, prefs),
   readCalibrationRecord: () => normalizeCalibrationRecord(readJson<unknown>(KEYS.calibration, null)),
+  readCalibration: () => normalizeCalibrationRecord(readJson<unknown>(KEYS.calibration, null))?.calibration ?? null,
   writeCalibrationRecord: (record: TestCalibrationRecord) => writeJson(KEYS.calibration, record),
+  writeCalibration: (calibration: TestCalibrationData) =>
+    writeJson(
+      KEYS.calibration,
+      buildRecordFromCalibration(calibration),
+    ),
   clearCalibrationRecord: () => removeJson(KEYS.calibration),
 }

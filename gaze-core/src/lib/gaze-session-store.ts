@@ -14,19 +14,19 @@ class GazeSessionStore {
   rememberIssuedToken(claims: GazeAccessTokenClaims) {
     this.issuedTokens.set(claims.jti, {
       claims,
-      gyroZeroSnapshot: this.issuedTokens.get(claims.jti)?.gyroZeroSnapshot ?? null,
+      neutralSnapshot: this.issuedTokens.get(claims.jti)?.neutralSnapshot ?? null,
     })
   }
 
-  rememberGyroZeroSnapshot(tokenId: string, snapshot: GyroReading) {
+  rememberNeutralSnapshot(tokenId: string, snapshot: GyroReading) {
     const existing = this.issuedTokens.get(tokenId)
     if (!existing) return
 
-    existing.gyroZeroSnapshot = snapshot
+    existing.neutralSnapshot = snapshot
   }
 
-  getGyroZeroSnapshot(tokenId: string) {
-    return this.issuedTokens.get(tokenId)?.gyroZeroSnapshot ?? null
+  getNeutralSnapshot(tokenId: string) {
+    return this.issuedTokens.get(tokenId)?.neutralSnapshot ?? null
   }
 
   openSession(socketId: string, claims: GazeAccessTokenClaims) {
@@ -36,7 +36,7 @@ class GazeSessionStore {
       uuid: claims.uuid,
       tokenId: claims.jti,
       calibration: null,
-      gyroZeroSnapshot: existingTokenState?.gyroZeroSnapshot ?? null,
+      neutralSnapshot: existingTokenState?.neutralSnapshot ?? null,
       latestGaze: null,
       lastPoint: null,
       releaseGyroSubscription: null,
@@ -50,12 +50,15 @@ class GazeSessionStore {
     return this.sessions.get(socketId) ?? null
   }
 
-  initializeSession(socketId: string, calibration: CalibrationPayload, gyroZeroSnapshot?: GyroReading | null) {
+  initializeSession(socketId: string, calibration: CalibrationPayload, neutralSnapshot?: GyroReading | null) {
     const session = this.sessions.get(socketId)
     if (!session) return null
 
     session.calibration = calibration
-    session.gyroZeroSnapshot = gyroZeroSnapshot ?? session.gyroZeroSnapshot ?? this.getGyroZeroSnapshot(session.tokenId)
+    session.neutralSnapshot = neutralSnapshot
+      ?? calibration.neutralSnapshot
+      ?? session.neutralSnapshot
+      ?? this.getNeutralSnapshot(session.tokenId)
     return session
   }
 

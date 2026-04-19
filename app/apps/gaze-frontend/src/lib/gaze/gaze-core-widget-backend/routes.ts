@@ -12,11 +12,23 @@ function buildRouteUrl(baseUrl: string | undefined, routePath: string) {
 }
 
 export function buildTokenRouteUrl(baseUrl?: string) {
-  return buildRouteUrl(baseUrl, "/api/gaze/token")
+  return buildRouteUrl(baseUrl, "/eye/token")
 }
 
 export function buildGyroSnapshotRouteUrl(baseUrl?: string) {
-  return buildRouteUrl(baseUrl, "/api/gaze/gyro-snapshot")
+  return buildRouteUrl(baseUrl, "/eye/calibration/phase-zero-settle")
+}
+
+export function buildPhaseZeroSettleRouteUrl(baseUrl?: string) {
+  return buildRouteUrl(baseUrl, "/eye/calibration/phase-zero-settle")
+}
+
+export function buildCalibrationRecordStartRouteUrl(baseUrl?: string) {
+  return buildRouteUrl(baseUrl, "/eye/calibration/record/start")
+}
+
+export function buildCalibrationRecordCompleteRouteUrl(baseUrl?: string) {
+  return buildRouteUrl(baseUrl, "/eye/calibration/record/complete")
 }
 
 export function buildLivePreviewSocketUrl(baseUrl?: string, overrideSocketUrl?: string) {

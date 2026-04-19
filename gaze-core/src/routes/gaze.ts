@@ -5,7 +5,14 @@ import { solveGazePoint } from "../lib/gaze-fusion"
 import { gazeMqttBridge } from "../lib/gaze-mqtt"
 import { gazeSessionStore } from "../lib/gaze-session-store"
 import { extractBearerToken, GazeTokenError, issueGazeAccessToken, verifyGazeAccessToken } from "../lib/gaze-token"
-import type { CalibrationPayload, GazeVectorPayload, GyroReading, SessionInitPayload } from "../lib/gaze-types"
+import type {
+  CalibrationPayload,
+  CalibrationRecordCompletePayload,
+  CalibrationRecordStartPayload,
+  GazeVectorPayload,
+  GyroReading,
+  SessionInitPayload,
+} from "../lib/gaze-types"
 import type { JsonRecord, SocketDataCarrier, SocketJsonSender, SocketTokenQueryData } from "../types/gaze"
 
 const tokenBodySchema = t.Object({
@@ -13,6 +20,24 @@ const tokenBodySchema = t.Object({
   metadata: t.Object({
     uuid: t.String({ minLength: 1 }),
   }),
+})
+
+const calibrationStartSchema = t.Object({
+  pointIndex: t.Number(),
+  target: t.Tuple([t.Number(), t.Number()]),
+  durationMs: t.Number(),
+  startedAt: t.Number(),
+})
+
+const calibrationCompleteSchema = t.Object({
+  captureId: t.String({ minLength: 1 }),
+  pointIndex: t.Number(),
+  screen: t.Tuple([t.Number(), t.Number()]),
+  gaze: t.Tuple([t.Number(), t.Number(), t.Number()]),
+  gazeSampleCount: t.Number(),
+  startedAt: t.Number(),
+  endedAt: t.Number(),
+  capturedAt: t.Number(),
 })
 
 function errorResponse(error: string, message: string) {
@@ -28,6 +53,8 @@ function buildZeroGyroReading(): GyroReading {
     pitch: 0,
     roll: 0,
     timestamp: Date.now(),
+    source: "fallback",
+    kind: "legacy-gyro",
   }
 }
 
@@ -75,18 +102,10 @@ async function parseJsonMessage(rawMessage: unknown) {
   throw new Error("WebSocket payload must be JSON text or UTF-8 bytes.")
 }
 
-function isCalibrationPayload(value: unknown): value is CalibrationPayload {
-  if (!value || typeof value !== "object") return false
-
-  const record = value as JsonRecord
-  if (!record.screen || !record.points) return false
-
-  const screen = record.screen as JsonRecord
-  return typeof record.version === "number"
-    && typeof record.createdAt === "number"
-    && typeof screen.width === "number"
-    && typeof screen.height === "number"
-    && Array.isArray(record.points)
+function isVector3(value: unknown): value is [number, number, number] {
+  return Array.isArray(value)
+    && value.length === 3
+    && value.every((entry) => typeof entry === "number" && Number.isFinite(entry))
 }
 
 function isGyroReading(value: unknown): value is GyroReading {
@@ -98,6 +117,37 @@ function isGyroReading(value: unknown): value is GyroReading {
     && typeof record.roll === "number"
 }
 
+function isCalibrationPayload(value: unknown): value is CalibrationPayload {
+  if (!value || typeof value !== "object") return false
+
+  const record = value as JsonRecord
+  if (!record.screen || !record.points) return false
+
+  const screen = record.screen as JsonRecord
+  if (
+    typeof record.version !== "number"
+    || typeof record.createdAt !== "number"
+    || typeof screen.width !== "number"
+    || typeof screen.height !== "number"
+    || !Array.isArray(record.points)
+  ) {
+    return false
+  }
+
+  return record.points.every((point) => {
+    if (!point || typeof point !== "object") return false
+
+    const typedPoint = point as JsonRecord
+    const hasLegacyCount = typeof typedPoint.sampleCount === "number"
+    const hasFaceAwareCount = typeof typedPoint.gazeSampleCount === "number" && typeof typedPoint.faceSampleCount === "number"
+
+    return Array.isArray(typedPoint.screen)
+      && typedPoint.screen.length === 2
+      && isVector3(typedPoint.gaze)
+      && (hasLegacyCount || hasFaceAwareCount)
+  })
+}
+
 function parseSessionInitMessage(payload: JsonRecord): SessionInitPayload | null {
   const type = typeof payload.type === "string" ? payload.type.trim().toLowerCase() : ""
   if (type !== "session.init" && type !== "live_preview_init") return null
@@ -106,21 +156,20 @@ function parseSessionInitMessage(payload: JsonRecord): SessionInitPayload | null
     throw new Error("Calibration payload is required before live preview can start.")
   }
 
+  const neutralSnapshot = payload.neutralSnapshot
   const gyroZeroSnapshot = payload.gyroZeroSnapshot
+  if (neutralSnapshot !== undefined && neutralSnapshot !== null && !isGyroReading(neutralSnapshot)) {
+    throw new Error("Neutral snapshot payload is invalid.")
+  }
   if (gyroZeroSnapshot !== undefined && gyroZeroSnapshot !== null && !isGyroReading(gyroZeroSnapshot)) {
     throw new Error("Gyro zero snapshot payload is invalid.")
   }
 
   return {
     calibration: payload.calibration,
+    neutralSnapshot: (neutralSnapshot as GyroReading | null | undefined) ?? (gyroZeroSnapshot as GyroReading | null | undefined) ?? null,
     gyroZeroSnapshot: (gyroZeroSnapshot as GyroReading | null | undefined) ?? null,
   }
-}
-
-function isVector3(value: unknown): value is [number, number, number] {
-  return Array.isArray(value)
-    && value.length === 3
-    && value.every((entry) => typeof entry === "number" && Number.isFinite(entry))
 }
 
 function parseGazeVectorMessage(payload: JsonRecord): GazeVectorPayload | null {
@@ -152,6 +201,31 @@ function parseSocketToken(ws: SocketDataCarrier) {
 
 function sendSocketJson(ws: SocketJsonSender, payload: JsonRecord) {
   ws.send(JSON.stringify(payload))
+}
+
+function ensureCaptureAlignment(startPayload: CalibrationRecordCompletePayload, faceStartedAt: number, faceEndedAt: number) {
+  const skewToleranceMs = gazeConfig.calibrationCaptureSkewToleranceMs
+
+  if (faceEndedAt < faceStartedAt) {
+    throw new Error("The face-pose capture timestamps were invalid. Please retry that point.")
+  }
+
+  const noOverlap = faceEndedAt < startPayload.startedAt - skewToleranceMs
+    || faceStartedAt > startPayload.endedAt + skewToleranceMs
+
+  if (noOverlap) {
+    throw new Error("The face-pose capture was not aligned with the gaze capture window. Please retry that point.")
+  }
+}
+
+function normalizeCompletePayload(body: CalibrationRecordCompletePayload) {
+  if (body.gazeSampleCount < 1) {
+    throw new Error("At least one gaze sample is required to complete a calibration point.")
+  }
+
+  if (body.endedAt < body.startedAt) {
+    throw new Error("Calibration completion timestamps are invalid.")
+  }
 }
 
 export const gazeRoutes = new Elysia({ prefix: "/gaze" })
@@ -196,50 +270,202 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
   .post(
     "/gyro-snapshot",
     async ({ request, set }) => {
-    try {
-      const token = extractBearerToken(request.headers.get("authorization"))
-      const claims = verifyGazeAccessToken(token ?? "")
-      gazeSessionStore.rememberIssuedToken(claims)
-
-      const snapshot = await gazeMqttBridge.awaitSnapshot(claims.uuid, gazeConfig.gyroSnapshotTimeoutMs)
-      gazeSessionStore.rememberGyroZeroSnapshot(claims.jti, snapshot)
-
-      return {
-        uuid: claims.uuid,
-        snapshot,
-        fallback: false,
-      }
-    } catch (error) {
-      if (error instanceof GazeTokenError) {
-        set.status = error.status
-        return errorResponse(error.code, error.message)
-      }
-
-      const fallbackSnapshot = buildZeroGyroReading()
-      if (error instanceof Error) {
-        console.warn("[GAZE] gyro snapshot unavailable, using zero fallback:", error.message)
-      } else {
-        console.warn("[GAZE] gyro snapshot unavailable, using zero fallback.")
-      }
-
       try {
         const token = extractBearerToken(request.headers.get("authorization"))
         const claims = verifyGazeAccessToken(token ?? "")
         gazeSessionStore.rememberIssuedToken(claims)
-        gazeSessionStore.rememberGyroZeroSnapshot(claims.jti, fallbackSnapshot)
+
+        const snapshot = await gazeMqttBridge.awaitSnapshot(claims.uuid, gazeConfig.gyroSnapshotTimeoutMs)
+        gazeSessionStore.rememberNeutralSnapshot(claims.jti, snapshot)
+
         return {
           uuid: claims.uuid,
-          snapshot: fallbackSnapshot,
-          fallback: true,
+          snapshot,
+          fallback: false,
         }
-      } catch {
-        set.status = 200
-        return {
-          snapshot: fallbackSnapshot,
-          fallback: true,
+      } catch (error) {
+        if (error instanceof GazeTokenError) {
+          set.status = error.status
+          return errorResponse(error.code, error.message)
+        }
+
+        const fallbackSnapshot = buildZeroGyroReading()
+
+        try {
+          const token = extractBearerToken(request.headers.get("authorization"))
+          const claims = verifyGazeAccessToken(token ?? "")
+          gazeSessionStore.rememberIssuedToken(claims)
+          gazeSessionStore.rememberNeutralSnapshot(claims.jti, fallbackSnapshot)
+          return {
+            uuid: claims.uuid,
+            snapshot: fallbackSnapshot,
+            fallback: true,
+          }
+        } catch {
+          set.status = 200
+          return {
+            snapshot: fallbackSnapshot,
+            fallback: true,
+          }
         }
       }
-    }
+    },
+    {
+      detail: {
+        tags: ["Gaze"],
+      },
+    },
+  )
+  .post(
+    "/calibration/record/start",
+    async ({ body, request, set }) => {
+      try {
+        const token = extractBearerToken(request.headers.get("authorization"))
+        const claims = verifyGazeAccessToken(token ?? "")
+        gazeSessionStore.rememberIssuedToken(claims)
+
+        return await gazeMqttBridge.startCalibrationCapture(claims.uuid, body as CalibrationRecordStartPayload)
+      } catch (error) {
+        if (error instanceof GazeTokenError) {
+          set.status = error.status
+          return errorResponse(error.code, error.message)
+        }
+
+        set.status = 503
+        return errorResponse(
+          "CALIBRATION_CAPTURE_START_FAILED",
+          error instanceof Error ? error.message : "Unable to start the calibration capture.",
+        )
+      }
+    },
+    {
+      body: calibrationStartSchema,
+      detail: {
+        tags: ["Gaze"],
+      },
+    },
+  )
+  .post(
+    "/calibration/record/complete",
+    async ({ body, request, set }) => {
+      const payload = body as CalibrationRecordCompletePayload
+
+      try {
+        normalizeCompletePayload(payload)
+
+        const token = extractBearerToken(request.headers.get("authorization"))
+        const claims = verifyGazeAccessToken(token ?? "")
+        gazeSessionStore.rememberIssuedToken(claims)
+
+        const pendingCapture = gazeMqttBridge.getPendingCapture(claims.uuid, payload.captureId)
+        if (!pendingCapture) {
+          set.status = 404
+          return errorResponse("CAPTURE_NOT_FOUND", "The calibration capture could not be found. Retry this point.")
+        }
+
+        if (pendingCapture.pointIndex !== payload.pointIndex) {
+          set.status = 409
+          return errorResponse("CAPTURE_POINT_MISMATCH", "The calibration capture does not match the requested point.")
+        }
+
+        const faceResult = await gazeMqttBridge.awaitCalibrationCaptureResult(
+          claims.uuid,
+          payload.captureId,
+          gazeConfig.calibrationCaptureResultTimeoutMs,
+        )
+
+        ensureCaptureAlignment(payload, faceResult.summary.startedAt, faceResult.summary.endedAt)
+
+        if (faceResult.summary.confidence < gazeConfig.calibrationFaceConfidenceThreshold) {
+          set.status = 422
+          return errorResponse("FACE_POSE_TOO_NOISY", "Face tracking was too noisy for this point. Please retry it.")
+        }
+
+        const point = {
+          screen: payload.screen,
+          gaze: payload.gaze,
+          facePoseBaseline: faceResult.summary,
+          gazeSampleCount: payload.gazeSampleCount,
+          faceSampleCount: faceResult.summary.sampleCount,
+          captureId: payload.captureId,
+          capturedAt: payload.capturedAt,
+          quality: Math.min(1, Math.max(faceResult.summary.confidence, faceResult.summary.quality ?? 0)),
+        }
+
+        const existingNeutralSnapshot = gazeSessionStore.getNeutralSnapshot(claims.jti)
+        const neutralSnapshot = existingNeutralSnapshot ?? (payload.pointIndex === 0 ? faceResult.summary : null)
+        if (neutralSnapshot) {
+          gazeSessionStore.rememberNeutralSnapshot(claims.jti, neutralSnapshot)
+        }
+
+        gazeMqttBridge.clearPendingCapture(claims.uuid, payload.captureId)
+
+        return {
+          captureId: payload.captureId,
+          point,
+          neutralSnapshot,
+        }
+      } catch (error) {
+        if (error instanceof GazeTokenError) {
+          set.status = error.status
+          return errorResponse(error.code, error.message)
+        }
+
+        set.status = 422
+        return errorResponse(
+          "CALIBRATION_CAPTURE_COMPLETE_FAILED",
+          error instanceof Error ? error.message : "Unable to complete the calibration capture.",
+        )
+      }
+    },
+    {
+      body: calibrationCompleteSchema,
+      detail: {
+        tags: ["Gaze"],
+      },
+    },
+  )
+  .post(
+    "/calibration/phase-zero-settle",
+    async ({ request, set }) => {
+      try {
+        const token = extractBearerToken(request.headers.get("authorization"))
+        const claims = verifyGazeAccessToken(token ?? "")
+        gazeSessionStore.rememberIssuedToken(claims)
+
+        const snapshot = await gazeMqttBridge.awaitSnapshot(claims.uuid, gazeConfig.gyroSnapshotTimeoutMs)
+        gazeSessionStore.rememberNeutralSnapshot(claims.jti, snapshot)
+
+        return {
+          uuid: claims.uuid,
+          snapshot,
+          fallback: false,
+        }
+      } catch (error) {
+        if (error instanceof GazeTokenError) {
+          set.status = error.status
+          return errorResponse(error.code, error.message)
+        }
+
+        const fallbackSnapshot = buildZeroGyroReading()
+        try {
+          const token = extractBearerToken(request.headers.get("authorization"))
+          const claims = verifyGazeAccessToken(token ?? "")
+          gazeSessionStore.rememberIssuedToken(claims)
+          gazeSessionStore.rememberNeutralSnapshot(claims.jti, fallbackSnapshot)
+          return {
+            uuid: claims.uuid,
+            snapshot: fallbackSnapshot,
+            fallback: true,
+          }
+        } catch {
+          set.status = 200
+          return {
+            snapshot: fallbackSnapshot,
+            fallback: true,
+          }
+        }
+      }
     },
     {
       detail: {
@@ -293,8 +519,16 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
           const initializedSession = gazeSessionStore.initializeSession(
             ws.id,
             sessionInit.calibration,
-            sessionInit.gyroZeroSnapshot,
+            sessionInit.neutralSnapshot ?? sessionInit.gyroZeroSnapshot ?? null,
           )
+          if (!initializedSession) {
+            sendSocketJson(ws, {
+              type: "error",
+              op: "session.init",
+              detail: "Unable to initialize the live preview session.",
+            })
+            return
+          }
 
           sendSocketJson(ws, {
             type: "ack",
@@ -319,9 +553,9 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
             return
           }
 
-          const zeroSnapshot = updatedSession.gyroZeroSnapshot ?? buildZeroGyroReading()
-          if (!updatedSession.gyroZeroSnapshot) {
-            gazeSessionStore.initializeSession(ws.id, updatedSession.calibration, zeroSnapshot)
+          const neutralSnapshot = updatedSession.neutralSnapshot ?? updatedSession.calibration.neutralSnapshot ?? buildZeroGyroReading()
+          if (!updatedSession.neutralSnapshot) {
+            gazeSessionStore.initializeSession(ws.id, updatedSession.calibration, neutralSnapshot)
           }
 
           const currentGyro = gazeMqttBridge.latestReading(updatedSession.uuid) ?? buildZeroGyroReading()
@@ -329,7 +563,7 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
           const solvedPoint = solveGazePoint({
             calibration: updatedSession.calibration,
             gazeVector: gazeVector.gazeVector,
-            zeroSnapshot,
+            zeroSnapshot: neutralSnapshot,
             currentGyro,
             previousPoint: updatedSession.lastPoint
               ? { x: updatedSession.lastPoint.x, y: updatedSession.lastPoint.y }
@@ -352,6 +586,8 @@ export const gazeRoutes = new Elysia({ prefix: "/gaze" })
               },
               basePoint: solvedPoint.basePoint,
               gyroDelta: solvedPoint.gyroDelta,
+              compensatedGazeVector: solvedPoint.compensatedGazeVector,
+              motionKind: solvedPoint.motionKind,
               currentGyro,
             },
           })

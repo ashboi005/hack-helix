@@ -7,9 +7,18 @@ import {
   type TestCalibrationRecord,
   testEyeTrackerStorage,
 } from "../../lib/gaze/gaze-core-widget-storage"
-import { buildGyroSnapshotRouteUrl, buildLivePreviewSocketUrl } from "../../lib/gaze/gaze-core-widget-backend/routes"
+import {
+  buildCalibrationRecordCompleteRouteUrl,
+  buildCalibrationRecordStartRouteUrl,
+  buildGyroSnapshotRouteUrl,
+  buildLivePreviewSocketUrl,
+} from "../../lib/gaze/gaze-core-widget-backend/routes"
 import { GazeWidgetTokenManager } from "../../lib/gaze/gaze-core-widget-backend/token-manager"
-import type { GyroSnapshot } from "../../lib/gaze/gaze-core-widget-backend/types"
+import type {
+  CalibrationCaptureCompleteResponse,
+  CalibrationCaptureStartResponse,
+  GyroSnapshot,
+} from "../../lib/gaze/gaze-core-widget-backend/types"
 import { connectLivePreviewSocket, WebSocketAuthorizationError } from "../../lib/gaze/gaze-core-widget-backend/websocket"
 import { exitFullscreenSafely, requestFullscreenSafely } from "../../lib/gaze/gaze-core-widget-fullscreen"
 import type {
@@ -50,7 +59,7 @@ export type GazeCoreWidgetOptions = {
 }
 
 export type LivePreviewConnectionStatus = "idle" | "connecting" | "connected" | "error"
-export type LivePreviewPoint = { x: number; y: number; timestamp: number }
+export type LivePreviewPoint = { x: number; y: number; timestamp: number; confidence?: number }
 
 export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   const savedPrefs = testEyeTrackerStorage.readPrefs()
@@ -87,7 +96,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   const [calibrationResult, setCalibrationResult] = useState<TestCalibrationResult>({
     data: savedCalibration,
     record: savedCalibrationRecord,
-    gyroZeroSnapshot: savedCalibrationRecord?.gyroZeroSnapshot ?? null,
+    neutralSnapshot: savedCalibrationRecord?.neutralSnapshot ?? null,
     rawJson: savedCalibrationRecord ? JSON.stringify(savedCalibrationRecord, null, 2) : "",
   })
 
@@ -113,6 +122,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   const savedPointsRef = useRef<TestCalibrationPoint[]>([])
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const captureProgressRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const calibrationCaptureRef = useRef<CalibrationCaptureStartResponse | null>(null)
   const livePreviewSocketRef = useRef<WebSocket | null>(null)
   const livePreviewActiveRef = useRef(false)
   const livePreviewSendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -268,13 +278,24 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     }
   }, [calibrating])
 
+  function extractRouteErrorMessage(payload: unknown, fallbackMessage: string) {
+    if (!payload || typeof payload !== "object") return fallbackMessage
+    const record = payload as Record<string, unknown>
+    if (typeof record.message === "string" && record.message.trim()) return record.message
+    if (typeof record.error === "string" && record.error.trim()) return record.error
+    return fallbackMessage
+  }
+
   function buildCalibrationRecord(
     calibration: TestCalibrationData,
-    gyroZeroSnapshot: GyroSnapshot | null,
+    neutralSnapshot: GyroSnapshot | null,
   ): TestCalibrationRecord {
     return {
-      calibration,
-      gyroZeroSnapshot,
+      calibration: {
+        ...calibration,
+        neutralSnapshot,
+      },
+      neutralSnapshot,
     }
   }
 
@@ -285,7 +306,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
       setCalibrationResult({
         data: null,
         record: null,
-        gyroZeroSnapshot: null,
+        neutralSnapshot: null,
         rawJson: "",
       })
       return
@@ -295,7 +316,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     setCalibrationResult({
       data: record.calibration,
       record,
-      gyroZeroSnapshot: record.gyroZeroSnapshot,
+      neutralSnapshot: record.neutralSnapshot,
       rawJson: JSON.stringify(record, null, 2),
     })
     calibrationRecordRef.current = record
@@ -309,26 +330,22 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   async function captureGyroZeroSnapshot() {
     const calibrationData = calibrationRecordRef.current?.calibration ?? calibrationResult.data
     if (!calibrationData) {
-      throw new Error("Run the 9-point calibration before capturing the gyro zero snapshot.")
+      throw new Error("Run the 9-point calibration before capturing the phase zero settle baseline.")
     }
 
     if (!options.backendBaseUrl?.trim()) {
-      throw new Error("A backend base URL is required to capture the gyro zero snapshot.")
+      throw new Error("A backend base URL is required to capture the phase zero settle baseline.")
     }
 
     setCalibrationError("")
-    setCalibrationStatusText("Capturing gyro zero snapshot...")
+    setCalibrationStatusText("Capturing phase zero settle baseline...")
     setGyroSnapshotPending(true)
 
     try {
-      const response = await tokenManagerRef.current.authorizedFetch(async (token) =>
-        fetch(buildGyroSnapshotRouteUrl(options.backendBaseUrl), {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-      )
+      const response = await fetch(buildGyroSnapshotRouteUrl(options.backendBaseUrl), {
+        method: "POST",
+        credentials: "include",
+      })
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { message?: string; error?: string } | null
@@ -336,7 +353,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
           ? payload.message
           : typeof payload?.error === "string"
             ? payload.error
-            : "Unable to capture the gyro zero snapshot."
+            : "Unable to capture the phase zero settle baseline."
 
         throw new Error(message)
       }
@@ -346,7 +363,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
       }
 
       if (!payload.snapshot) {
-        throw new Error("The backend returned an empty gyro zero snapshot.")
+        throw new Error("The backend returned an empty phase zero settle baseline.")
       }
 
       const record = buildCalibrationRecord(calibrationData, payload.snapshot)
@@ -364,7 +381,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   }
 
   function hasGyroSnapshotRequirements() {
-    return Boolean(options.backendBaseUrl?.trim()) && hasTokenAuthorizationConfig()
+    return Boolean(options.backendBaseUrl?.trim())
   }
 
   function hasLivePreviewSocketRoute() {
@@ -379,9 +396,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     return (
       hasLivePreviewRequirements()
       && Boolean(calibrationResult.data)
-      && Boolean(calibrationResult.gyroZeroSnapshot)
-      && previewActive
-      && Boolean(sessionRef.current)
+      && Boolean(calibrationResult.neutralSnapshot)
     )
   }
 
@@ -438,7 +453,12 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
               ? (nested as Record<string, number>).y
               : null
     if (typeof xRaw !== "number" || typeof yRaw !== "number") return null
-    return { x: xRaw, y: yRaw, timestamp: Date.now() }
+    const confidence = typeof record.confidence === "number"
+      ? record.confidence
+      : typeof envelope.confidence === "number"
+        ? envelope.confidence
+        : null
+    return { x: xRaw, y: yRaw, timestamp: Date.now(), confidence: confidence ?? undefined }
   }
 
   function sendLivePreviewGaze(result: GazeVectorReturn | null = latestLivePreviewResultRef.current) {
@@ -490,13 +510,22 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
       setLivePreviewError("Run the 9-point calibration before live preview.")
       return
     }
-    if (!calibrationRecord.gyroZeroSnapshot) {
-      setLivePreviewError("Capture the gyro zero snapshot before starting live preview.")
+    if (!calibrationRecord.neutralSnapshot) {
+      setLivePreviewError("Capture the phase zero settle baseline before starting live preview.")
       return
     }
-    if (!previewActive) {
-      setLivePreviewError("Start camera preview first so gaze vectors are available.")
-      return
+    if (!previewActive || !sessionRef.current) {
+      setLivePreviewStatus("connecting")
+      setLivePreviewError("")
+      await openPreview()
+
+      if (!sessionRef.current) {
+        livePreviewActiveRef.current = false
+        setLivePreviewActive(false)
+        setLivePreviewStatus("error")
+        setLivePreviewError("Unable to start camera preview for live overlay. Check camera permissions and source configuration.")
+        return
+      }
     }
 
     stopLivePreview()
@@ -532,7 +561,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
       socket.send(JSON.stringify({
         type: "session.init",
         calibration: calibrationRecord.calibration,
-        gyroZeroSnapshot: calibrationRecord.gyroZeroSnapshot,
+        neutralSnapshot: calibrationRecord.neutralSnapshot,
       }))
 
       socket.onmessage = (event: MessageEvent<string>) => {
@@ -896,6 +925,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
     setCaptureActive(false)
     setCaptureProgress(0)
     setCalibrationStatusText("")
+    calibrationCaptureRef.current = null
     if (captureTimerRef.current) clearTimeout(captureTimerRef.current)
     if (captureProgressRef.current) clearInterval(captureProgressRef.current)
     captureTimerRef.current = null
@@ -909,69 +939,146 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
 
   function capturePoint() {
     if (!previewActive || captureActive || !calibrating) return
+    if (!options.backendBaseUrl?.trim()) {
+      setCalibrationError("A backend base URL is required for synchronized face-aware calibration.")
+      return
+    }
 
     setCalibrationError("")
-    setCalibrationStatusText("Capturing gaze samples...")
-    setCaptureActive(true)
-    setCaptureProgress(0)
-    captureSamplesRef.current = []
+    setCalibrationStatusText("Starting synchronized gaze and face capture...")
 
-    const durationMs = 3000
-    const startedAt = Date.now()
+    void (async () => {
+      try {
+        const point = calibrationGrid[calibIndex]
+        const durationMs = 3000
+        const startedAt = Date.now()
+        const startResponse = await fetch(buildCalibrationRecordStartRouteUrl(options.backendBaseUrl), {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pointIndex: calibIndex,
+            target: point,
+            durationMs,
+            startedAt,
+          }),
+        })
 
-    captureProgressRef.current = setInterval(() => {
-      const elapsed = Date.now() - startedAt
-      setCaptureProgress(Math.min(100, (elapsed / durationMs) * 100))
-    }, 50)
+        const startPayload = await startResponse.json().catch(() => null) as CalibrationCaptureStartResponse | { error?: string; message?: string } | null
+        if (!startResponse.ok || !startPayload || typeof startPayload !== "object" || typeof (startPayload as CalibrationCaptureStartResponse).captureId !== "string") {
+          throw new Error(extractRouteErrorMessage(startPayload, "Unable to start the synchronized calibration capture."))
+        }
 
-    captureTimerRef.current = setTimeout(() => {
-      void (async () => {
-        if (captureProgressRef.current) clearInterval(captureProgressRef.current)
-        captureTimerRef.current = null
-        captureProgressRef.current = null
-
-        const samples = captureSamplesRef.current
+        calibrationCaptureRef.current = startPayload as CalibrationCaptureStartResponse
+        setCalibrationStatusText("Capturing gaze samples with face pose...")
+        setCaptureActive(true)
+        setCaptureProgress(0)
         captureSamplesRef.current = []
+
+        captureProgressRef.current = setInterval(() => {
+          const elapsed = Date.now() - startedAt
+          setCaptureProgress(Math.min(100, (elapsed / durationMs) * 100))
+        }, 50)
+
+        captureTimerRef.current = setTimeout(() => {
+          void (async () => {
+            if (captureProgressRef.current) clearInterval(captureProgressRef.current)
+            captureTimerRef.current = null
+            captureProgressRef.current = null
+
+            const samples = captureSamplesRef.current
+            captureSamplesRef.current = []
+            setCaptureActive(false)
+            setCaptureProgress(0)
+
+            const mostCommonVector = modeVector(samples)
+            if (!mostCommonVector) {
+              setCalibrationStatusText("")
+              setCalibrationError("No stable gaze vector was captured for this point. Please retry it.")
+              calibrationCaptureRef.current = null
+              return
+            }
+
+            const completionResponse = await fetch(buildCalibrationRecordCompleteRouteUrl(options.backendBaseUrl), {
+              method: "POST",
+              credentials: "include",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                captureId: calibrationCaptureRef.current?.captureId,
+                pointIndex: calibIndex,
+                screen: point,
+                gaze: mostCommonVector,
+                gazeSampleCount: samples.length,
+                startedAt,
+                endedAt: Date.now(),
+                capturedAt: Date.now(),
+              }),
+            })
+
+            const completionPayload = await completionResponse.json().catch(() => null) as CalibrationCaptureCompleteResponse | { error?: string; message?: string } | null
+            if (
+              !completionResponse.ok
+              || !completionPayload
+              || typeof completionPayload !== "object"
+              || !("point" in completionPayload)
+            ) {
+              setCalibrationStatusText("")
+              setCalibrationError(extractRouteErrorMessage(completionPayload, "Unable to complete this calibration point. Please retry it."))
+              calibrationCaptureRef.current = null
+              return
+            }
+
+            const completedPoint = (completionPayload as CalibrationCaptureCompleteResponse).point
+            savedPointsRef.current.push(completedPoint)
+
+            const nextIndex = calibIndex + 1
+            const nextNeutralSnapshot = calibrationResult.neutralSnapshot
+              ?? (completionPayload as CalibrationCaptureCompleteResponse).neutralSnapshot
+              ?? savedPointsRef.current[0]?.facePoseBaseline
+              ?? null
+
+            if (nextIndex >= calibrationGrid.length) {
+              const data: TestCalibrationData = {
+                version: 2,
+                createdAt: Date.now(),
+                screen: calibrationViewportRef.current,
+                points: savedPointsRef.current,
+                neutralSnapshot: nextNeutralSnapshot,
+              }
+              options.onCalibrationComplete?.(data)
+
+              const provisionalRecord = buildCalibrationRecord(data, nextNeutralSnapshot)
+              applyCalibrationRecord(provisionalRecord)
+              options.onCalibrationRecordReady?.(provisionalRecord)
+              setCalibrationStatusText("")
+              calibrationCaptureRef.current = null
+              await stopCalibration()
+              return
+            }
+
+            calibrationCaptureRef.current = null
+            setCalibrationStatusText("")
+            setCalibIndex(nextIndex)
+          })().catch((error) => {
+            setCaptureActive(false)
+            setCaptureProgress(0)
+            setCalibrationStatusText("")
+            setCalibrationError(error instanceof Error ? error.message : "Unable to complete this calibration point. Please retry it.")
+            calibrationCaptureRef.current = null
+          })
+        }, durationMs)
+      } catch (error) {
         setCaptureActive(false)
         setCaptureProgress(0)
         setCalibrationStatusText("")
-
-        const mostCommonVector = modeVector(samples)
-        if (!mostCommonVector) return
-
-        const point = calibrationGrid[calibIndex]
-        savedPointsRef.current.push({
-          screen: point,
-          gaze: mostCommonVector,
-          sampleCount: samples.length,
-        })
-
-        const nextIndex = calibIndex + 1
-        if (nextIndex >= calibrationGrid.length) {
-          const data: TestCalibrationData = {
-            version: 1,
-            createdAt: Date.now(),
-            screen: calibrationViewportRef.current,
-            points: savedPointsRef.current,
-          }
-          options.onCalibrationComplete?.(data)
-
-          const provisionalRecord = buildCalibrationRecord(data, calibrationResult.gyroZeroSnapshot ?? null)
-          applyCalibrationRecord(provisionalRecord)
-
-          try {
-            await captureGyroZeroSnapshot()
-          } catch (error) {
-            setCalibrationError(error instanceof Error ? error.message : "Unable to capture the gyro zero snapshot.")
-          }
-
-          await stopCalibration()
-          return
-        }
-
-        setCalibIndex(nextIndex)
-      })()
-    }, durationMs)
+        setCalibrationError(error instanceof Error ? error.message : "Unable to start the calibration capture.")
+        calibrationCaptureRef.current = null
+      }
+    })()
   }
 
   function clearCalibration() {
@@ -986,7 +1093,7 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
   const calibrationTargetTransform = calibPoint
     ? getCalibrationTargetTransform(calibPoint, calibrationViewport.width, calibrationViewport.height)
     : "translate(-50%, -50%)"
-  const gyroZeroReady = Boolean(calibrationResult.gyroZeroSnapshot)
+  const gyroZeroReady = Boolean(calibrationResult.neutralSnapshot)
   const tokenAuthorizationReady = hasTokenAuthorizationConfig()
   const gyroSnapshotConfigured = hasGyroSnapshotRequirements()
   const livePreviewSocketRouteReady = hasLivePreviewSocketRoute()

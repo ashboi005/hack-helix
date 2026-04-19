@@ -25,7 +25,7 @@ export function ModeStep({ state }: { state: GazeCoreWidgetState }) {
         <div className="space-y-3 rounded-md border p-4">
           <p className="text-sm font-medium">9-Point Calibration</p>
           <p className="text-sm text-muted-foreground">
-            Look at each target and press Space. Capture runs for 3 seconds and uses the most common gaze vector sample for each point.
+            Look at each target and press Space. Each point now runs a synchronized 3-second gaze-plus-face capture window.
           </p>
           <Button className="w-full" onClick={state.startCalibration} disabled={state.calibrating || !state.previewActive}>
             Start Calibration
@@ -39,7 +39,7 @@ export function ModeStep({ state }: { state: GazeCoreWidgetState }) {
             onClick={() => void state.captureGyroZeroSnapshot()}
             disabled={!state.calibrationResult.data || !state.gyroSnapshotConfigured || state.gyroSnapshotPending}
           >
-            {state.gyroSnapshotPending ? "Capturing Gyro Zero..." : state.gyroZeroReady ? "Re-Capture Gyro Zero" : "Capture Gyro Zero"}
+            {state.gyroSnapshotPending ? "Capturing Phase Zero..." : state.gyroZeroReady ? "Re-Capture Phase Zero" : "Capture Phase Zero"}
           </Button>
           {state.calibrationStatusText && (
             <p className="text-xs text-muted-foreground">{state.calibrationStatusText}</p>
@@ -53,11 +53,11 @@ export function ModeStep({ state }: { state: GazeCoreWidgetState }) {
 
         <div className="space-y-3 rounded-md border border-dashed p-4 text-sm">
           <p className="text-muted-foreground">
-            Live preview needs calibration JSON, a gyro zero snapshot, live gaze vectors, token authorization, and a websocket route.
+            Live preview needs paired calibration JSON, a phase-zero baseline, live gaze vectors, token authorization, and a websocket route.
           </p>
           <div className="grid grid-cols-2 gap-2 text-xs">
             <RequirementStatus label="Calibration JSON" ready={Boolean(state.calibrationResult.data)} />
-            <RequirementStatus label="Gyro Zero" ready={state.gyroZeroReady} />
+            <RequirementStatus label="Phase Zero" ready={state.gyroZeroReady} />
             <RequirementStatus label="Gaze Stream" ready={state.previewActive} />
             <RequirementStatus label="Token/Auth" ready={state.tokenAuthorizationReady} />
             <RequirementStatus label="WS Route" ready={state.livePreviewSocketRouteReady} />
@@ -65,7 +65,7 @@ export function ModeStep({ state }: { state: GazeCoreWidgetState }) {
           </div>
           {!state.gyroSnapshotConfigured && (
             <p className="text-xs text-muted-foreground">
-              Gyro zero capture needs a backend base URL plus either an API key and device UUID or an already-issued token.
+              Phase-zero capture needs the app backend base URL so the widget can proxy the settle request through the server.
             </p>
           )}
           {state.livePreviewError && (

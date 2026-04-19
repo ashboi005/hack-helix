@@ -166,7 +166,6 @@ export default function CalibratePage() {
 
   const widgetConfig = {
     backendBaseUrl,
-    authToken: session.token, // pass gaze token for the widget
     deviceUuid: session.uuid,
     livePreviewSocketUrl: session.websocketUrl,
     livePreviewToken: session.token,

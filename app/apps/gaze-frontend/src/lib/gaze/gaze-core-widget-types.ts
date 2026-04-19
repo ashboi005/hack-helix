@@ -50,7 +50,7 @@ export type ModeVectorPoint = {
 export type TestCalibrationResult = {
   data: TestCalibrationData | null
   record: TestCalibrationRecord | null
-  gyroZeroSnapshot: GyroSnapshot | null
+  neutralSnapshot: GyroSnapshot | null
   rawJson: string
 }
 

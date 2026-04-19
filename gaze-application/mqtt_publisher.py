@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from typing import Callable
 from urllib.parse import urlparse
 
 try:
@@ -11,6 +12,9 @@ except ImportError as exc:  # pragma: no cover - import guard for runtime setup
     raise RuntimeError(
         "Missing dependency 'paho-mqtt'. Install it with: pip install paho-mqtt"
     ) from exc
+
+
+MessageHandler = Callable[[str, dict], None]
 
 
 @dataclass(slots=True)
@@ -48,16 +52,34 @@ class MqttPublisher:
             self.client.username_pw_set(config.username, config.password)
 
         self._connected = False
+        self._subscriptions: dict[str, MessageHandler] = {}
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        self.client.on_message = self._on_message
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         self._connected = reason_code == 0
         if reason_code != 0:
             raise RuntimeError(f"MQTT connection failed with code {reason_code}")
 
+        for topic in self._subscriptions:
+            client.subscribe(topic, qos=self.config.qos)
+
     def _on_disconnect(self, client, userdata, *args) -> None:
         self._connected = False
+
+    def _on_message(self, client, userdata, message) -> None:
+        handler = self._subscriptions.get(message.topic)
+        if handler is None:
+            return
+
+        try:
+            payload = json.loads(message.payload.decode("utf-8"))
+        except json.JSONDecodeError:
+            return
+
+        if isinstance(payload, dict):
+            handler(message.topic, payload)
 
     def connect(self) -> None:
         parsed = urlparse(self.config.broker_url)
@@ -82,10 +104,10 @@ class MqttPublisher:
         if not self._connected:
             raise RuntimeError(f"Timed out while connecting to MQTT broker {self.config.broker_url}")
 
-    def publish(self, payload: dict) -> None:
+    def publish(self, payload: dict, *, topic: str | None = None) -> None:
         message = json.dumps(payload, separators=(",", ":"))
         result = self.client.publish(
-            self.config.topic,
+            topic or self.config.topic,
             payload=message,
             qos=self.config.qos,
             retain=self.config.retain,
@@ -93,6 +115,11 @@ class MqttPublisher:
         result.wait_for_publish()
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError(f"Failed to publish MQTT message: rc={result.rc}")
+
+    def subscribe(self, topic: str, handler: MessageHandler) -> None:
+        self._subscriptions[topic] = handler
+        if self._connected:
+            self.client.subscribe(topic, qos=self.config.qos)
 
     def disconnect(self) -> None:
         try:

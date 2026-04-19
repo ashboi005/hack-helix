@@ -1,9 +1,28 @@
 import { gazeConfig } from "./gaze-config"
-import type { CalibrationPayload, GyroReading, SolvedGazePoint, Vector3 } from "./gaze-types"
-import type { GyroScale, Point2D, SolveGazePointInput } from "../types/gaze-fusion"
+import type { CalibrationPayload, CalibrationPointPayload, GyroReading, MotionSourceKind, SolvedGazePoint, Vector3 } from "./gaze-types"
+import type { GyroScale, MotionDelta, Point2D, SolveGazePointInput } from "../types/gaze-fusion"
 
 function clamp(value: number, minValue: number, maxValue: number) {
   return Math.max(minValue, Math.min(maxValue, value))
+}
+
+function clampAbs(value: number, maxAbsValue: number) {
+  const safeMaxAbs = Math.abs(maxAbsValue)
+  return clamp(value, -safeMaxAbs, safeMaxAbs)
+}
+
+function applyDeadzone(value: number, threshold: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.abs(value) < Math.abs(threshold) ? 0 : value
+}
+
+function averageNumber(values: number[]) {
+  if (values.length === 0) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function degreesToRadians(value: number) {
+  return (value * Math.PI) / 180
 }
 
 function normalizeVector(vector: Vector3 | null | undefined): Vector3 | null {
@@ -44,6 +63,22 @@ function angleBetweenVectors(a: Vector3, b: Vector3) {
   return (Math.acos(dot) * 180) / Math.PI
 }
 
+function multiplyMatrices(left: number[][], right: number[][]) {
+  return left.map((row) =>
+    right[0].map((_, columnIndex) =>
+      row.reduce((sum, value, rowIndex) => sum + value * right[rowIndex][columnIndex], 0),
+    ))
+}
+
+function multiplyMatrixVector(matrix: number[][], vector: Vector3): Vector3 {
+  return matrix.map((row) =>
+    row[0] * vector[0] + row[1] * vector[1] + row[2] * vector[2]) as Vector3
+}
+
+function transposeMatrix(matrix: number[][]) {
+  return matrix[0].map((_, columnIndex) => matrix.map((row) => row[columnIndex]))
+}
+
 function groupBoundaryVectors(
   calibration: CalibrationPayload,
   axis: "x" | "y",
@@ -59,6 +94,60 @@ function groupBoundaryVectors(
       return Math.abs(value - boundary) <= 0.5
     })
     .map((point) => point.gaze)
+}
+
+function inferHorizontalMirrorSign(calibration: CalibrationPayload): number | null {
+  if (!gazeConfig.headPoseAutoMirrorHorizontal || calibration.points.length < 2) {
+    return null
+  }
+
+  const xValues = calibration.points.map((point) => point.screen[0])
+  const minX = Math.min(...xValues)
+  const maxX = Math.max(...xValues)
+  const xSpan = Math.abs(maxX - minX)
+  if (xSpan <= 1e-6) return null
+
+  const leftPoints = calibration.points.filter((point) => Math.abs(point.screen[0] - minX) <= 0.5)
+  const rightPoints = calibration.points.filter((point) => Math.abs(point.screen[0] - maxX) <= 0.5)
+
+  const leftGazeX = averageNumber(leftPoints.map((point) => point.gaze[0]))
+  const rightGazeX = averageNumber(rightPoints.map((point) => point.gaze[0]))
+  const leftYaw = averageNumber(
+    leftPoints
+      .map((point) => point.facePoseBaseline?.yaw)
+      .filter((value): value is number => Number.isFinite(value as number)),
+  )
+  const rightYaw = averageNumber(
+    rightPoints
+      .map((point) => point.facePoseBaseline?.yaw)
+      .filter((value): value is number => Number.isFinite(value as number)),
+  )
+
+  const gazeSpan = leftGazeX !== null && rightGazeX !== null ? rightGazeX - leftGazeX : null
+  const yawSpan = leftYaw !== null && rightYaw !== null ? rightYaw - leftYaw : null
+
+  if (gazeSpan !== null && yawSpan !== null && Math.abs(gazeSpan) > 1e-4 && Math.abs(yawSpan) > 1e-2) {
+    return Math.sign(gazeSpan) === Math.sign(yawSpan) ? 1 : -1
+  }
+
+  let gazeCovariance = 0
+  let yawCovariance = 0
+  const midpoint = calibration.screen.width / 2
+
+  for (const point of calibration.points) {
+    const centeredX = (point.screen[0] - midpoint) / Math.max(calibration.screen.width, 1)
+    gazeCovariance += centeredX * point.gaze[0]
+    const yaw = point.facePoseBaseline?.yaw
+    if (typeof yaw === "number" && Number.isFinite(yaw)) {
+      yawCovariance += centeredX * yaw
+    }
+  }
+
+  if (Math.abs(gazeCovariance) <= 1e-6 || Math.abs(yawCovariance) <= 1e-6) {
+    return null
+  }
+
+  return Math.sign(gazeCovariance) === Math.sign(yawCovariance) ? 1 : -1
 }
 
 function deriveGyroScale(calibration: CalibrationPayload): GyroScale {
@@ -80,19 +169,96 @@ function deriveGyroScale(calibration: CalibrationPayload): GyroScale {
   }
 }
 
-function solveBasePoint(calibration: CalibrationPayload, gazeVector: Vector3) {
+function deriveMotionDelta(zeroSnapshot: GyroReading, currentGyro: GyroReading): MotionDelta {
+  return {
+    x: currentGyro.x - zeroSnapshot.x,
+    y: currentGyro.y - zeroSnapshot.y,
+    z: currentGyro.z - zeroSnapshot.z,
+    yaw: currentGyro.yaw - zeroSnapshot.yaw,
+    pitch: currentGyro.pitch - zeroSnapshot.pitch,
+    roll: currentGyro.roll - zeroSnapshot.roll,
+  }
+}
+
+function normalizeMotionDeltaForCalibration(
+  motionDelta: MotionDelta,
+  horizontalMirrorSign: number,
+): MotionDelta {
+  const safeSign = horizontalMirrorSign < 0 ? -1 : 1
+
+  return {
+    x: clampAbs(applyDeadzone(motionDelta.x * safeSign, gazeConfig.headPoseTranslationDeadzone), 50),
+    y: clampAbs(applyDeadzone(motionDelta.y, gazeConfig.headPoseTranslationDeadzone), 50),
+    z: clampAbs(applyDeadzone(motionDelta.z, gazeConfig.headPoseTranslationDeadzone), 50),
+    yaw: clampAbs(applyDeadzone(motionDelta.yaw * safeSign, gazeConfig.headPoseYawDeadzoneDeg), 30),
+    pitch: clampAbs(applyDeadzone(motionDelta.pitch, gazeConfig.headPosePitchDeadzoneDeg), 30),
+    roll: clampAbs(applyDeadzone(motionDelta.roll * safeSign, gazeConfig.headPoseRollDeadzoneDeg), 25),
+  }
+}
+
+function resolveMotionKind(currentGyro: GyroReading): MotionSourceKind {
+  return currentGyro.kind ?? "legacy-gyro"
+}
+
+function compensateGazeVectorWithHeadPose(
+  gazeVector: Vector3,
+  motionDelta: MotionDelta,
+): Vector3 {
+  const normalizedGaze = normalizeVector(gazeVector)
+  if (!normalizedGaze) {
+    return gazeVector
+  }
+
+  const yaw = degreesToRadians(-motionDelta.yaw * gazeConfig.headPoseYawCompensation)
+  const pitch = degreesToRadians(-motionDelta.pitch * gazeConfig.headPosePitchCompensation)
+  const roll = degreesToRadians(-motionDelta.roll * gazeConfig.headPoseRollCompensation)
+
+  const yawMatrix = [
+    [Math.cos(yaw), 0, Math.sin(yaw)],
+    [0, 1, 0],
+    [-Math.sin(yaw), 0, Math.cos(yaw)],
+  ]
+
+  const pitchMatrix = [
+    [1, 0, 0],
+    [0, Math.cos(pitch), -Math.sin(pitch)],
+    [0, Math.sin(pitch), Math.cos(pitch)],
+  ]
+
+  const rollMatrix = [
+    [Math.cos(roll), -Math.sin(roll), 0],
+    [Math.sin(roll), Math.cos(roll), 0],
+    [0, 0, 1],
+  ]
+
+  const combinedRotation = multiplyMatrices(rollMatrix, multiplyMatrices(pitchMatrix, yawMatrix))
+  const compensated = multiplyMatrixVector(transposeMatrix(combinedRotation), normalizedGaze)
+  return normalizeVector(compensated) ?? gazeVector
+}
+
+function scoreCalibrationPoint(
+  point: CalibrationPointPayload,
+  gazeVector: Vector3,
+) {
+  const normalizedCalibration = normalizeVector(point.gaze)
+  const rawAngle = normalizedCalibration ? angleBetweenVectors(gazeVector, normalizedCalibration) : 180
+
+  return {
+    point,
+    angle: rawAngle,
+    rawAngle,
+  }
+}
+
+function solveBasePoint(
+  calibration: CalibrationPayload,
+  gazeVector: Vector3,
+) {
   const normalizedGaze = normalizeVector(gazeVector)
   if (!normalizedGaze || calibration.points.length === 0) return null
 
   const rankedPoints = calibration.points
-    .map((point) => {
-      const normalizedCalibration = normalizeVector(point.gaze)
-      const angle = normalizedCalibration ? angleBetweenVectors(normalizedGaze, normalizedCalibration) : 180
-      return {
-        point,
-        angle,
-      }
-    })
+    .map((point) => scoreCalibrationPoint(point, normalizedGaze))
     .sort((left, right) => left.angle - right.angle)
     .slice(0, 4)
 
@@ -108,7 +274,7 @@ function solveBasePoint(calibration: CalibrationPayload, gazeVector: Vector3) {
     totalWeight += weight
     weightedX += candidate.point.screen[0] * weight
     weightedY += candidate.point.screen[1] * weight
-    weightedAngle += candidate.angle * weight
+    weightedAngle += candidate.rawAngle * weight
   }
 
   if (totalWeight <= 0) return null
@@ -125,34 +291,56 @@ function solveBasePoint(calibration: CalibrationPayload, gazeVector: Vector3) {
   }
 }
 
-function applyGyroCorrection(
+function applyLegacyGyroCorrection(
   basePoint: Point2D,
   calibration: CalibrationPayload,
-  zeroSnapshot: GyroReading,
-  currentGyro: GyroReading,
+  motionDelta: MotionDelta,
 ) {
   const scale = deriveGyroScale(calibration)
-  const yawDelta = currentGyro.yaw - zeroSnapshot.yaw
-  const pitchDelta = currentGyro.pitch - zeroSnapshot.pitch
-  const rollDelta = currentGyro.roll - zeroSnapshot.roll
 
   const correctedX = basePoint.x
-    - yawDelta * scale.pixelsPerYawDegree
-    + rollDelta * scale.pixelsPerRollDegree
+    - motionDelta.yaw * scale.pixelsPerYawDegree
+    + motionDelta.roll * scale.pixelsPerRollDegree
 
   const correctedY = basePoint.y
-    - pitchDelta * scale.pixelsPerPitchDegree
-    + rollDelta * scale.pixelsPerRollDegree * 0.2
+    - motionDelta.pitch * scale.pixelsPerPitchDegree
+    + motionDelta.roll * scale.pixelsPerRollDegree * 0.2
 
   return {
     point: {
       x: clamp(correctedX, 0, calibration.screen.width),
       y: clamp(correctedY, 0, calibration.screen.height),
     },
-    gyroDelta: {
-      yaw: yawDelta,
-      pitch: pitchDelta,
-      roll: rollDelta,
+  }
+}
+
+function applyFacePoseCorrection(
+  basePoint: Point2D,
+  calibration: CalibrationPayload,
+  motionDelta: MotionDelta,
+) {
+  const scale = deriveGyroScale(calibration)
+
+  const yawCorrectionPx = motionDelta.yaw * scale.pixelsPerYawDegree * gazeConfig.headPoseYawCompensation
+  const pitchCorrectionPx = motionDelta.pitch * scale.pixelsPerPitchDegree * gazeConfig.headPosePitchCompensation
+  const rollCorrectionPx = motionDelta.roll * scale.pixelsPerRollDegree * gazeConfig.headPoseRollCompensation
+
+  const correctedX = basePoint.x
+    - yawCorrectionPx
+    + rollCorrectionPx * 0.12
+    - motionDelta.x * gazeConfig.headTranslationXMultiplier
+    - motionDelta.z * gazeConfig.headTranslationZMultiplier * 0.15
+
+  const correctedY = basePoint.y
+    - pitchCorrectionPx
+    + rollCorrectionPx * 0.06
+    - motionDelta.y * gazeConfig.headTranslationYMultiplier
+    + motionDelta.z * gazeConfig.headTranslationZMultiplier * 0.08
+
+  return {
+    point: {
+      x: clamp(correctedX, 0, calibration.screen.width),
+      y: clamp(correctedY, 0, calibration.screen.height),
     },
   }
 }
@@ -166,7 +354,7 @@ function smoothPoint(
 
   const diagonal = Math.hypot(calibration.screen.width, calibration.screen.height) || 1
   const jumpRatio = Math.hypot(nextPoint.x - previousPoint.x, nextPoint.y - previousPoint.y) / diagonal
-  const alpha = jumpRatio > 0.25 ? 0.18 : jumpRatio > 0.1 ? 0.28 : 0.42
+  const alpha = jumpRatio > 0.25 ? 0.12 : jumpRatio > 0.1 ? 0.2 : 0.32
 
   return {
     x: previousPoint.x + (nextPoint.x - previousPoint.x) * alpha,
@@ -175,10 +363,34 @@ function smoothPoint(
 }
 
 export function solveGazePoint(input: SolveGazePointInput): SolvedGazePoint | null {
-  const base = solveBasePoint(input.calibration, input.gazeVector)
+  const motionKind = resolveMotionKind(input.currentGyro)
+  const configuredHorizontalSign = gazeConfig.headPoseHorizontalSign < 0 ? -1 : 1
+  const inferredHorizontalSign = motionKind === "face-pose"
+    ? inferHorizontalMirrorSign(input.calibration)
+    : null
+
+  const horizontalMirrorSign = motionKind === "face-pose"
+    ? inferredHorizontalSign ?? configuredHorizontalSign
+    : 1
+
+  const motionDelta = normalizeMotionDeltaForCalibration(
+    deriveMotionDelta(input.zeroSnapshot, input.currentGyro),
+    horizontalMirrorSign,
+  )
+
+  const compensatedGazeVector = motionKind === "face-pose"
+    ? compensateGazeVectorWithHeadPose(input.gazeVector, motionDelta)
+    : input.gazeVector
+
+  const base = solveBasePoint(
+    input.calibration,
+    compensatedGazeVector,
+  )
   if (!base) return null
 
-  const corrected = applyGyroCorrection(base.point, input.calibration, input.zeroSnapshot, input.currentGyro)
+  const corrected = motionKind === "face-pose"
+    ? applyFacePoseCorrection(base.point, input.calibration, motionDelta)
+    : applyLegacyGyroCorrection(base.point, input.calibration, motionDelta)
   const smoothed = smoothPoint(input.previousPoint, corrected.point, input.calibration)
 
   return {
@@ -190,6 +402,8 @@ export function solveGazePoint(input: SolveGazePointInput): SolvedGazePoint | nu
       x: base.point.x,
       y: base.point.y,
     },
-    gyroDelta: corrected.gyroDelta,
+    gyroDelta: motionDelta,
+    compensatedGazeVector,
+    motionKind,
   }
 }

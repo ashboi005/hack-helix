@@ -1,6 +1,7 @@
 import type { GazeVectorReturn, RoiRect as PackageRoiRect } from "@/lib/gaze/gaze-core"
 export type RoiRect = PackageRoiRect
-import type { TestCalibrationData } from "@/lib/gaze/gaze-core-widget-storage"
+import type { TestCalibrationData, TestCalibrationRecord } from "@/lib/gaze/gaze-core-widget-storage"
+import type { GyroSnapshot } from "@/lib/gaze/gaze-core-widget-backend/types"
 
 export type Step = "source" | "roi" | "eyeModel" | "thresholds" | "mode"
 
@@ -48,6 +49,8 @@ export type ModeVectorPoint = {
 
 export type TestCalibrationResult = {
   data: TestCalibrationData | null
+  record: TestCalibrationRecord | null
+  neutralSnapshot: GyroSnapshot | null
   rawJson: string
 }
 

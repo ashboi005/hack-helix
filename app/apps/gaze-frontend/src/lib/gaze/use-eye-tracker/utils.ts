@@ -1,4 +1,4 @@
-import type { GazeVectorReturn } from "@/lib/gaze-core"
+import type { GazeVectorReturn } from "@/lib/gaze/gaze-core"
 import type { ModeVectorPoint, PreviewGazeData, RoiRect } from "./types"
 
 export function buildCalibrationGrid(screenWidth: number, screenHeight: number): [number, number][] {

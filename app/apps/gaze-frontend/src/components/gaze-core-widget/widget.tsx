@@ -1,5 +1,7 @@
-﻿"use client"
-import { useGazeCoreSetupWidget } from "../../hooks/use-gaze-core-setup"
+"use client"
+
+import { useEffect } from "react"
+import { useGazeLiveOverlay } from "../gaze-live-overlay-provider"
 import type { GazeCoreWidgetProps, GazeCoreWidgetState } from "./types"
 import { CalibrationOverlay } from "./CalibrationOverlay"
 import { LivePreviewOverlay } from "./LivePreviewOverlay"
@@ -13,14 +15,29 @@ import { SourceStep } from "./steps/source"
 import { ThresholdsStep } from "./steps/thresholds"
 
 export function GazeCoreWidget(props: GazeCoreWidgetProps = {}) {
-  const state = useGazeCoreSetupWidget(props)
+  const { state, configureWidget } = useGazeLiveOverlay()
+
+  useEffect(() => {
+    configureWidget(props)
+  }, [
+    configureWidget,
+    props.apiKey,
+    props.backendBaseUrl,
+    props.deviceUuid,
+    props.livePreviewSocketUrl,
+    props.livePreviewToken,
+    props.onCalibrationComplete,
+    props.onCalibrationRecordReady,
+    props.onLivePreviewPoint,
+    props.onLiveResult,
+  ])
+
   return <GazeCoreWidgetView state={state} />
 }
 
 export function GazeCoreWidgetView({ state }: { state: GazeCoreWidgetState }) {
   return (
     <main className="flex w-full flex-col bg-background">
-
       <CalibrationOverlay state={state} />
       <LivePreviewOverlay state={state} />
       <GazeCoreWidgetEntry state={state} />
