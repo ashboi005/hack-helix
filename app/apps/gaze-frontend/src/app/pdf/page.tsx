@@ -905,6 +905,97 @@ function ModeChip({ mode, value }: { mode: AttentionMode; value: AttentionMode }
   )
 }
 
+function SimpleMarkdown({ text }: { text: string }) {
+  if (!text) return <span className="text-zinc-500 italic">No response yet.</span>
+
+  const lines = text.split("\n")
+  const elements: React.ReactNode[] = []
+  let i = 0
+
+  const inlineFormat = (raw: string, key: string | number): React.ReactNode => {
+    // Process bold (**text**), italic (*text*), inline code (`code`)
+    const parts: React.ReactNode[] = []
+    let remaining = raw
+    let idx = 0
+    const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g
+    let match: RegExpExecArray | null
+    let lastIndex = 0
+    re.lastIndex = 0
+    while ((match = re.exec(remaining)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(remaining.slice(lastIndex, match.index))
+      }
+      if (match[2]) {
+        parts.push(<strong key={`b-${key}-${idx++}`} className="font-semibold text-zinc-100">{match[2]}</strong>)
+      } else if (match[3]) {
+        parts.push(<em key={`i-${key}-${idx++}`} className="italic text-zinc-300">{match[3]}</em>)
+      } else if (match[4]) {
+        parts.push(<code key={`c-${key}-${idx++}`} className="rounded bg-white/10 px-1 py-0.5 font-mono text-xs text-amber-200">{match[4]}</code>)
+      }
+      lastIndex = match.index + match[0].length
+    }
+    if (lastIndex < remaining.length) parts.push(remaining.slice(lastIndex))
+    return <>{parts}</>
+  }
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Heading 1-3
+    const h3 = line.match(/^###\s+(.+)/)
+    const h2 = line.match(/^##\s+(.+)/)
+    const h1 = line.match(/^#\s+(.+)/)
+    if (h1) { elements.push(<h3 key={i} className="mt-3 text-sm font-bold text-zinc-100">{inlineFormat(h1[1], i)}</h3>); i++; continue }
+    if (h2) { elements.push(<h4 key={i} className="mt-2 text-sm font-semibold text-zinc-200">{inlineFormat(h2[1], i)}</h4>); i++; continue }
+    if (h3) { elements.push(<h5 key={i} className="mt-2 text-xs font-semibold uppercase tracking-wide text-zinc-300">{inlineFormat(h3[1], i)}</h5>); i++; continue }
+
+    // Unordered list items
+    const listMatch = line.match(/^[-*+]\s+(.+)/)
+    if (listMatch) {
+      const listItems: React.ReactNode[] = []
+      while (i < lines.length && lines[i].match(/^[-*+]\s+/)) {
+        const text = lines[i].replace(/^[-*+]\s+/, "")
+        listItems.push(<li key={i} className="flex gap-2"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" /><span>{inlineFormat(text, i)}</span></li>)
+        i++
+      }
+      elements.push(<ul key={`ul-${i}`} className="mt-1 space-y-1 text-sm text-zinc-200">{listItems}</ul>)
+      continue
+    }
+
+    // Numbered list
+    const numMatch = line.match(/^\d+\.\s+(.+)/)
+    if (numMatch) {
+      const listItems: React.ReactNode[] = []
+      let n = 1
+      while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
+        const text = lines[i].replace(/^\d+\.\s+/, "")
+        listItems.push(<li key={i} className="flex gap-2"><span className="shrink-0 font-mono text-xs text-zinc-400">{n}.</span><span>{inlineFormat(text, i)}</span></li>)
+        i++; n++
+      }
+      elements.push(<ol key={`ol-${i}`} className="mt-1 space-y-1 text-sm text-zinc-200">{listItems}</ol>)
+      continue
+    }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      elements.push(<hr key={i} className="my-2 border-white/10" />)
+      i++; continue
+    }
+
+    // Empty line → spacer
+    if (line.trim() === "") {
+      elements.push(<div key={i} className="h-2" />)
+      i++; continue
+    }
+
+    // Regular paragraph
+    elements.push(<p key={i} className="text-sm leading-relaxed text-zinc-200">{inlineFormat(line, i)}</p>)
+    i++
+  }
+
+  return <>{elements}</>
+}
+
 function ResponseCard({ title, content, accent }: { title: string; content: string; accent: "emerald" | "cyan" | "amber" }) {
   const tone =
     accent === "emerald"
@@ -916,7 +1007,9 @@ function ResponseCard({ title, content, accent }: { title: string; content: stri
   return (
     <article className={`rounded-2xl border ${tone} p-4`}>
       <p className="text-xs font-semibold uppercase tracking-[0.13em] text-zinc-300">{title}</p>
-      <p className="mt-2 max-h-56 overflow-auto text-sm leading-relaxed text-zinc-200">{content || "No response yet."}</p>
+      <div className="mt-2 max-h-72 overflow-auto">
+        <SimpleMarkdown text={content} />
+      </div>
     </article>
   )
 }

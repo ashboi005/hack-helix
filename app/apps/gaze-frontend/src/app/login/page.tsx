@@ -182,7 +182,7 @@ function LoginPageContent() {
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="Your full name"
-                  className="h-10 w-full rounded-md border border-white/20 bg-[#0b1324] px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                  className="h-10 w-full rounded-md border border-white/20 bg-[#0b1324] px-3 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                 />
               </label>
             )}
@@ -193,7 +193,7 @@ function LoginPageContent() {
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="you@example.com"
-                className="h-10 w-full rounded-md border border-white/20 bg-[#0b1324] px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                className="h-10 w-full rounded-md border border-white/20 bg-[#0b1324] px-3 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
               />
             </label>
 
@@ -204,7 +204,7 @@ function LoginPageContent() {
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="At least 8 characters"
                 type="password"
-                className="h-10 w-full rounded-md border border-white/20 bg-[#0b1324] px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                className="h-10 w-full rounded-md border border-white/20 bg-[#0b1324] px-3 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
               />
             </label>
 

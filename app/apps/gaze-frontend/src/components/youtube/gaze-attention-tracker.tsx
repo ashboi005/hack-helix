@@ -83,6 +83,7 @@ export function useGazeAttentionTracker(video: YouTubeVideo) {
             if (inVideo) {
                 focusTimeRef.current += 100
                 distractionTimeRef.current = 0
+                lastPeripheralNotificationAtRef.current = 0
 
                 // After 1 second of looking at the video, blur the peripheral (comments/suggested)
                 if (focusTimeRef.current >= 1000) {
@@ -111,9 +112,9 @@ export function useGazeAttentionTracker(video: YouTubeVideo) {
                 setIsVideoPaused(true)
             }
 
-            // Only notify if deeply distracted (4s+) so we don't spam if they just glanced away.
-            // But we pause at 3s already.
-            if (distractionTimeRef.current > 4000) {
+            // Only notify if deeply distracted (4s+) and at most once per 15 seconds.
+            const notifCooldown = 15000
+            if (distractionTimeRef.current > 4000 && now - lastPeripheralNotificationAtRef.current > notifCooldown) {
                 lastPeripheralNotificationAtRef.current = now
                 notifications.addNotification({
                     title: "Focus Reminder",
