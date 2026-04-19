@@ -13,6 +13,7 @@ import {
 import { useRouter } from "next/navigation"
 import { Space_Grotesk } from "next/font/google"
 
+import { useGazeLiveOverlay } from "@/components/gaze-live-overlay-provider"
 import { useSession } from "@/lib/auth-client"
 import {
   checkDistraction,
@@ -62,6 +63,7 @@ type PdfWindow = Window & {
 export default function PdfPage() {
   const router = useRouter()
   const { data: authSession, isPending: authPending } = useSession()
+  const { latestPoint: liveOverlayPoint, state: liveOverlayState } = useGazeLiveOverlay()
 
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
   const [activeDocId, setActiveDocIdState] = useState<string | null>(null)
@@ -96,6 +98,7 @@ export default function PdfPage() {
   const pdfJsRef = useRef<PdfJsRuntime | null>(null)
   const persistAtRef = useRef(0)
   const mockSampleAtRef = useRef(0)
+  const lastLiveOverlaySampleTsRef = useRef(0)
   const detectionTickRef = useRef<() => void>(() => {})
 
   const isAuthenticated = Boolean(authSession?.user?.id)
@@ -197,6 +200,41 @@ export default function PdfPage() {
     window.addEventListener("focuslayer-eye-sample", onEyeSample as EventListener)
     return () => window.removeEventListener("focuslayer-eye-sample", onEyeSample as EventListener)
   }, [currentPage, isAuthenticated, mockEyeTrackerEnabled])
+
+  useEffect(() => {
+    if (mockEyeTrackerEnabled || !isAuthenticated) return
+    if (!liveOverlayState.livePreviewActive || !liveOverlayPoint) return
+    if (liveOverlayPoint.timestamp <= lastLiveOverlaySampleTsRef.current) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+
+    const offsetX = liveOverlayPoint.x - rect.left
+    const offsetY = liveOverlayPoint.y - rect.top
+    const insideCanvas = offsetX >= 0 && offsetY >= 0 && offsetX <= rect.width && offsetY <= rect.height
+    if (!insideCanvas) return
+
+    lastLiveOverlaySampleTsRef.current = liveOverlayPoint.timestamp
+
+    const x = (offsetX / rect.width) * canvas.width
+    const y = (offsetY / rect.height) * canvas.height
+
+    pushCoordinate({
+      x,
+      y,
+      source: "eye",
+      pageNumber: currentPage,
+    })
+  }, [
+    currentPage,
+    isAuthenticated,
+    liveOverlayPoint,
+    liveOverlayState.livePreviewActive,
+    mockEyeTrackerEnabled,
+  ])
 
   // Cursor Y as a percentage of the canvas height (0-100), used for the spotlight overlay
   const cursorYPercent = useMemo(() => {
