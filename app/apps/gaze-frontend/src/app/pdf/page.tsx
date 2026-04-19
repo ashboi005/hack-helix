@@ -777,7 +777,7 @@ export default function PdfPage() {
 
                     {pdfLoaded && lastPoint && (() => {
                       // Spotlight band: slightly larger than before for better readability
-                      const bandHalf = 2.8
+                      const bandHalf = 6
                       const aboveEnd = Math.max(0, cursorYPercent - bandHalf)
                       const belowStart = Math.min(100, cursorYPercent + bandHalf)
 
