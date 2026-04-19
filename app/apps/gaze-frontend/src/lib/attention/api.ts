@@ -25,7 +25,7 @@ export type ExplainRereadRequest = {
 
 export type ExplainRereadResponse = { explanation: string }
 
-type CheckDistractionBackendBody = {
+export type CheckDistractionBackendBody = {
   docId: string
   fullPageBase64: string
   fullPagePageNumber: number
@@ -33,6 +33,8 @@ type CheckDistractionBackendBody = {
   pageNumbers: number[]
   recentCoordinates?: CheckDistractionRequest["recentCoordinates"]
 }
+
+
 
 export type CheckDistractionResponse = {
   genuine: boolean
@@ -115,6 +117,8 @@ export async function summariseDocument(input: SummariseRequest): Promise<Summar
 
   return parseJsonResponse<SummariseResponse>(response, "Unable to fetch summary")
 }
+
+
 
 export function buildSummariseRequest(docId: string, options?: { pageNumbers?: number[] }): SummariseRequest {
   const pages = normalizePageNumbers(options?.pageNumbers ?? [])
