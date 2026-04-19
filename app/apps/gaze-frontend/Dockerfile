@@ -1,34 +1,30 @@
 # syntax=docker/dockerfile:1
 
-FROM node:20-alpine AS deps
-WORKDIR /app
-
-COPY package.json ./
-RUN npm install
-
-FROM node:20-alpine AS build
+FROM oven/bun:1 AS build
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY bun.lock package.json tsconfig.json bts.jsonc ./
+COPY apps ./apps
+COPY packages ./packages
 
-RUN npm run build
+RUN bun install
+RUN bun run --cwd apps/gaze-frontend build
 
-FROM node:20-alpine AS runtime
-WORKDIR /app
+FROM oven/bun:1 AS runtime
+WORKDIR /app/apps/gaze-frontend
 
 ENV NODE_ENV=production
 ENV PORT=3002
 ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/public ./public
-COPY --from=build /app/next.config.ts ./next.config.ts
+COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /app/apps/gaze-frontend/package.json ./package.json
+COPY --from=build /app/apps/gaze-frontend/.next ./.next
+COPY --from=build /app/apps/gaze-frontend/public ./public
+COPY --from=build /app/apps/gaze-frontend/next.config.ts ./next.config.ts
 
 EXPOSE 3002
 
-CMD ["npm", "run", "start"]
+CMD ["bun", "run", "start"]

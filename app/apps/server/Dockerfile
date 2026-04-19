@@ -6,9 +6,9 @@ WORKDIR /app
 # Build with monorepo context rooted at /app
 COPY bun.lock package.json tsconfig.json bts.jsonc ./
 COPY packages ./packages
-COPY apps/server ./apps/server
+COPY apps ./apps
 
-RUN bun install --frozen-lockfile
+RUN bun install
 RUN bun run --cwd apps/server build
 
 FROM oven/bun:1 AS runtime
