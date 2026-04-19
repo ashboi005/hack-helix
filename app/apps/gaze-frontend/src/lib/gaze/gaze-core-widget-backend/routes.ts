@@ -44,6 +44,8 @@ export function buildLivePreviewSocketUrl(baseUrl?: string, overrideSocketUrl?: 
   const normalizedBaseUrl = normalizeBackendBaseUrl(baseUrl)
 
   if (!/^https?:\/\//i.test(normalizedBaseUrl)) {
+    // Relative base URL — resolve against the current page origin so that
+    // HTTPS pages automatically get wss:// and HTTP pages get ws://.
     const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"
     const httpUrl = new URL(`/api/gaze/screen/ws`, origin)
     httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:"
@@ -51,6 +53,13 @@ export function buildLivePreviewSocketUrl(baseUrl?: string, overrideSocketUrl?: 
   }
 
   const url = new URL("/api/gaze/screen/ws", `${normalizedBaseUrl}/`)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  // Upgrade ws/wss to match the security level of the current page: if the
+  // page is on HTTPS always use wss:// regardless of what the backend URL says.
+  const pageIsHttps = typeof window !== "undefined" && window.location.protocol === "https:"
+  if (pageIsHttps) {
+    url.protocol = "wss:"
+  } else {
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  }
   return url.toString()
 }
