@@ -67,9 +67,16 @@ function buildTopic(uuid: string, suffix: string) {
 
 export function buildWebSocketUrlFromRequest(request: Request) {
   const url = new URL(request.url)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  const isHttps = url.protocol === "https:" || request.headers.get("x-forwarded-proto") === "https"
+  url.protocol = isHttps ? "wss:" : "ws:"
   url.pathname = gazeConfig.websocketPath
   url.search = ""
   url.hash = ""
+  
+  const forwardedHost = request.headers.get("x-forwarded-host")
+  if (forwardedHost) {
+    url.host = forwardedHost
+  }
+  
   return url.toString()
 }

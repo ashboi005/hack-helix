@@ -18,14 +18,15 @@ export async function connectLivePreviewSocket(input: {
   token: string
   timeoutMs?: number
 }) {
-  const url = new URL(input.socketUrl)
-  url.searchParams.set("token", input.token)
-
+  let secureUrl = input.socketUrl
   // Always use wss:// when the page is served over HTTPS. The server may be
   // behind a TLS-terminating proxy that returns ws:// URLs — upgrade them here.
   if (typeof window !== "undefined" && window.location.protocol === "https:") {
-    url.protocol = "wss:"
+    secureUrl = secureUrl.replace(/^ws:\/\//i, "wss://").replace(/^http:\/\//i, "wss://").replace(/^https:\/\//i, "wss://")
   }
+
+  const url = new URL(secureUrl)
+  url.searchParams.set("token", input.token)
 
   return await new Promise<WebSocket>((resolve, reject) => {
     const socket = new WebSocket(url.toString())

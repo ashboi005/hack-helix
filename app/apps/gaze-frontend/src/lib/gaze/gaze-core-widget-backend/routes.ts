@@ -42,7 +42,7 @@ export function buildCalibrationRecordCompleteRouteUrl(baseUrl?: string) {
 // reverse proxies that return plain ws:// URLs from the backend).
 function upgradeToSecureWs(wsUrl: string): string {
   if (typeof window !== "undefined" && window.location.protocol === "https:") {
-    return wsUrl.replace(/^ws:\/\//i, "wss://")
+    return wsUrl.replace(/^ws:\/\//i, "wss://").replace(/^http:\/\//i, "wss://").replace(/^https:\/\//i, "wss://")
   }
   return wsUrl
 }
