@@ -10,6 +10,7 @@ import {
   type MouseEvent,
   type WheelEvent,
 } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Space_Grotesk } from "next/font/google"
 
@@ -21,8 +22,8 @@ import {
   getDocument,
   initiateDocumentUpload,
   listDocuments,
+  requestSummary,
   setActiveDocumentId,
-  summariseLine,
   type DocumentSummary,
   uploadPdfToPresignedUrl,
 } from "@/lib/attention/api"
@@ -58,7 +59,7 @@ type PdfWindow = Window & {
   pdfjsLib?: PdfJsRuntime
 }
 
-type AssistPromptKind = "summarise-line" | "explain-reread"
+type AssistPromptKind = "summarise-full" | "explain-reread"
 
 type AssistPromptState = {
   kind: AssistPromptKind
@@ -117,7 +118,7 @@ export default function PdfPage() {
   const lastLiveOverlaySampleTsRef = useRef(0)
   const lastPromptedModeRef = useRef<AttentionMode>("reading")
   const promptCooldownRef = useRef<Record<AssistPromptKind, number>>({
-    "summarise-line": 0,
+    "summarise-full": 0,
     "explain-reread": 0,
   })
   const detectionTickRef = useRef<() => void>(() => {})
@@ -254,7 +255,7 @@ export default function PdfPage() {
     if (assistPrompt || assistBusy) return
     if (mode !== "distraction" && mode !== "rereading") return
 
-    const kind: AssistPromptKind = mode === "distraction" ? "summarise-line" : "explain-reread"
+    const kind: AssistPromptKind = mode === "distraction" ? "summarise-full" : "explain-reread"
     const now = Date.now()
     if (now - promptCooldownRef.current[kind] < 25_000) return
 
@@ -264,7 +265,7 @@ export default function PdfPage() {
             kind,
             mode,
             title: "You look distracted",
-            description: "Generate a quick AI summary for the exact line you are looking at? Press Space to confirm.",
+            description: "Generate a quick AI summary for the whole PDF? Press Space to confirm.",
           }
         : {
             kind,
@@ -400,7 +401,7 @@ export default function PdfPage() {
       if (assistBusy) return
 
       const evidence = buildEvidenceCapture(
-        kind === "summarise-line" ? "Distraction line summary" : "Reread line explanation",
+        kind === "summarise-full" ? "Distraction full-document summary" : "Reread line explanation",
       )
       if (!evidence) {
         setStatus("Need an active page and gaze point before generating assistance")
@@ -414,16 +415,15 @@ export default function PdfPage() {
       setError("")
 
       try {
-        if (kind === "summarise-line") {
-          setStatus("Generating line summary from distraction prompt...")
-          const response = await summariseLine({
+        if (kind === "summarise-full") {
+          setStatus("Generating full PDF summary from distraction prompt...")
+          const response = await requestSummary({
             docId: activeDocId,
-            pageNumber: evidence.pageNumber,
-            regionBase64: evidence.lineBase64,
+            scope: "full",
           })
           setSummaryText(response.summary)
-          setDistractionText("Distraction prompt accepted. Generated a summary for the currently viewed line.")
-          setStatus("Line summary generated")
+          setDistractionText("Distraction prompt accepted. Generated a summary for the whole PDF.")
+          setStatus("Full PDF summary generated")
           return
         }
 
@@ -537,29 +537,44 @@ export default function PdfPage() {
 
   if (authPending) {
     return (
-      <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] px-6 py-10 text-zinc-100`}>
-        <div className="mx-auto max-w-4xl rounded-xl border border-white/10 bg-[#0a1220]/90 p-6 text-sm text-zinc-300">
-          Checking authentication for PDF workspace...
-        </div>
+      <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+        <section className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-8 lg:px-10">
+          <div className="rounded-xl border border-white/10 bg-[#070e1a]/90 p-6 text-sm text-zinc-300 shadow-[0_18px_32px_-28px_rgba(0,0,0,0.95)]">
+            Checking authentication for PDF workspace...
+          </div>
+        </section>
       </main>
     )
   }
 
   if (!isAuthenticated) {
     return (
-      <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] px-6 py-10 text-zinc-100`}>
-        <div className="mx-auto max-w-4xl rounded-xl border border-white/10 bg-[#0a1220]/90 p-6 text-sm text-zinc-300">
-          Redirecting to login...
-        </div>
+      <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+        <section className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-8 lg:px-10">
+          <div className="rounded-xl border border-white/10 bg-[#070e1a]/90 p-6 text-sm text-zinc-300 shadow-[0_18px_32px_-28px_rgba(0,0,0,0.95)]">
+            Redirecting to login...
+          </div>
+        </section>
       </main>
     )
   }
 
   return (
-    <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] text-zinc-100`}>
-      <section className="mx-auto flex min-h-screen w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="rounded-2xl border border-white/10 bg-[#0a1220]/90 p-5 shadow-[0_20px_45px_-35px_rgba(0,0,0,0.95)]">
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">PDF Workspace</p>
+    <main className={`${spaceGrotesk.className} relative min-h-screen overflow-hidden bg-[#040812] text-zinc-100`}>
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_84%_85%,rgba(20,184,166,0.2),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent_28%)]" />
+      <section className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-5 px-6 py-8 sm:px-8 lg:px-10">
+        <header className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-5 shadow-[0_20px_45px_-35px_rgba(0,0,0,0.95)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">PDF Workspace</p>
+            <Link
+              href="/"
+              className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-zinc-100 transition-colors hover:bg-white/20"
+            >
+              Back To Home
+            </Link>
+          </div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">ADHD Attention Reader</h1>
           <p className="mt-2 text-sm text-zinc-300">
             Upload PDF, track reading modes, keep a 60-second coordinate window, and trigger assistance routes from
@@ -569,7 +584,7 @@ export default function PdfPage() {
 
         <div className="grid gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
           <aside className="space-y-4">
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
               <h2 className="text-sm font-semibold uppercase tracking-[0.13em] text-zinc-300">PDF Upload</h2>
               <div className="mt-3 space-y-3">
                 <input
@@ -584,7 +599,7 @@ export default function PdfPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
               <h2 className="text-sm font-semibold uppercase tracking-[0.13em] text-zinc-300">Documents</h2>
               <button
                 onClick={() => void refreshDocuments()}
@@ -610,7 +625,7 @@ export default function PdfPage() {
                     className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${
                       activeDocId === document.id
                         ? "border-cyan-300/60 bg-cyan-500/18 text-cyan-100"
-                        : "border-white/10 bg-[#0d1727] text-zinc-300 hover:border-white/20"
+                        : "border-white/10 bg-[#0d1628] text-zinc-300 hover:border-white/20"
                     }`}
                   >
                     <div className="font-medium">{document.fileName}</div>
@@ -621,7 +636,7 @@ export default function PdfPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
               <h2 className="text-sm font-semibold uppercase tracking-[0.13em] text-zinc-300">Mode</h2>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                 <ModeChip mode={mode} value="reading" />
@@ -646,7 +661,7 @@ export default function PdfPage() {
           </aside>
 
           <section className="space-y-4">
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-zinc-100">Reader Surface</p>
@@ -768,7 +783,7 @@ export default function PdfPage() {
             </section>
 
             {evidenceCapture && (
-              <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4">
+              <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-300">Gaze Evidence</p>
                 <p className="mt-1 text-xs text-zinc-400">
                   {evidenceCapture.actionLabel} | page {evidenceCapture.pageNumber} | ({Math.round(evidenceCapture.lookedPoint.x)},{" "}
@@ -791,7 +806,7 @@ export default function PdfPage() {
               />
             )}
 
-            <section className="rounded-2xl border border-white/10 bg-[#08101e] p-4 text-xs">
+            <section className="rounded-2xl border border-white/10 bg-[#070e1a]/90 p-4 text-xs">
               <p className="font-medium text-zinc-200">Status: {status}</p>
               {error && <p className="mt-1 text-rose-300">Error: {error}</p>}
               <p className="mt-2 text-zinc-400">
