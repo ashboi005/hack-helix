@@ -186,7 +186,7 @@ export async function fastQuery(
     content,
     model: "openai/gpt-5.4",
     chunk_count: 1,
-    websearch_enable: true,
+    websearch_enable: false,
   };
 
   if (normalizedChatId.length > 0) {
