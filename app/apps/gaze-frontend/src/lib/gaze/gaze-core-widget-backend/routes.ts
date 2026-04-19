@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_BASE_URL = "http://localhost:3000"
+const DEFAULT_BACKEND_BASE_URL = "/api/backend"
 
 export function normalizeBackendBaseUrl(baseUrl?: string) {
   const normalized = (baseUrl?.trim() || DEFAULT_BACKEND_BASE_URL).replace(/\/+$/g, "")
@@ -7,6 +7,13 @@ export function normalizeBackendBaseUrl(baseUrl?: string) {
 
 function buildRouteUrl(baseUrl: string | undefined, routePath: string) {
   const normalizedBaseUrl = normalizeBackendBaseUrl(baseUrl)
+
+  if (!/^https?:\/\//i.test(normalizedBaseUrl)) {
+    const base = normalizedBaseUrl.replace(/\/+$/g, "")
+    const suffix = routePath.startsWith("/") ? routePath : `/${routePath}`
+    return `${base}${suffix}`
+  }
+
   const url = new URL(routePath, `${normalizedBaseUrl}/`)
   return url.toString()
 }
@@ -34,7 +41,16 @@ export function buildCalibrationRecordCompleteRouteUrl(baseUrl?: string) {
 export function buildLivePreviewSocketUrl(baseUrl?: string, overrideSocketUrl?: string) {
   if (overrideSocketUrl?.trim()) return overrideSocketUrl.trim()
 
-  const url = new URL("/api/gaze/screen/ws", `${normalizeBackendBaseUrl(baseUrl)}/`)
+  const normalizedBaseUrl = normalizeBackendBaseUrl(baseUrl)
+
+  if (!/^https?:\/\//i.test(normalizedBaseUrl)) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"
+    const httpUrl = new URL(`/api/gaze/screen/ws`, origin)
+    httpUrl.protocol = httpUrl.protocol === "https:" ? "wss:" : "ws:"
+    return httpUrl.toString()
+  }
+
+  const url = new URL("/api/gaze/screen/ws", `${normalizedBaseUrl}/`)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   return url.toString()
 }

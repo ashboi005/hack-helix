@@ -34,6 +34,16 @@ function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/g, "")
 }
 
+function buildBackendUrl(baseUrl: string, path: string) {
+  if (/^https?:\/\//i.test(baseUrl)) {
+    return new URL(path, `${baseUrl}/`).toString()
+  }
+
+  const normalizedBase = baseUrl.replace(/\/+$/g, "")
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+  return `${normalizedBase}${normalizedPath}`
+}
+
 function extractErrorMessage(payload: unknown, fallbackMessage: string) {
   if (!payload || typeof payload !== "object") return fallbackMessage
   const record = payload as Record<string, unknown>
@@ -58,7 +68,7 @@ export default function CalibratePage() {
 
   const fetchEyeToken = useCallback(async (): Promise<EyeTokenPayload> => {
     // Use cookie-based auth (credentials: include) instead of Bearer token
-    const eyeTokenResponse = await fetch(new URL("/eye/token", `${backendBaseUrl}/`), {
+    const eyeTokenResponse = await fetch(buildBackendUrl(backendBaseUrl, "/eye/token"), {
       method: "POST",
       credentials: "include",
     })
