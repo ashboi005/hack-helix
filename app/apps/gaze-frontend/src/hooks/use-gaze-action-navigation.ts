@@ -75,10 +75,20 @@ function extractEyeTokenPayload(payload: unknown): EyeTokenPayload | null {
 
 function buildTokenEndpointCandidates(baseUrl: string) {
     const normalized = normalizeBaseUrl(baseUrl)
+
+    // Safely combine paths without relying on URL constructor if base is relative
+    const buildPath = (path: string) => {
+        if (/^https?:\/\//i.test(normalized)) {
+            return new URL(path, `${normalized}/`).toString()
+        }
+        const cleanPath = path.startsWith("/") ? path : `/${path}`
+        return `${normalized}${cleanPath}`
+    }
+
     const candidates = [
-        new URL("/eye/token", `${normalized}/`).toString(),
+        buildPath("/eye/token"),
         "/eye/token",
-        new URL("/api/gaze/token", `${normalized}/`).toString(),
+        buildPath("/api/gaze/token"),
         "/api/gaze/token",
     ]
 
@@ -206,7 +216,8 @@ export function useGazeActionNavigation(options: UseGazeActionNavigationOptions 
             setSessionBusy(true)
             setAuthError("")
             try {
-                const eyeSession = await fetchEyeToken(userId)
+                // We know userId is non-null because of the check above
+                const eyeSession = await fetchEyeToken(userId!)
                 if (cancelled) return
                 setRouteSession(eyeSession)
             } catch (caughtError) {

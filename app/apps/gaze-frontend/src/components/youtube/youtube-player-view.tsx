@@ -66,7 +66,7 @@ export function YouTubePlayerView({ video, onBack, onSelectRelated }: YouTubePla
     }, [iframeRef])
 
     return (
-        <div className={`relative flex h-screen w-full flex-col bg-[#040812] overflow-hidden ${spaceGrotesk.className}`}>
+        <div className={`relative flex min-h-screen w-full flex-col bg-[#040812] ${spaceGrotesk.className}`}>
             {isGazeActive && (
                 <span
                     className="pointer-events-none fixed z-50 block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-cyan-300 bg-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.7)]"
@@ -86,7 +86,7 @@ export function YouTubePlayerView({ video, onBack, onSelectRelated }: YouTubePla
                 >
                     ← Back to Search
                 </button>
-                <span className="text-sm font-semibold tracking-wide text-zinc-400">Now Playing</span>
+
             </div>
 
             {/* Main Grid Layout */}
@@ -96,13 +96,13 @@ export function YouTubePlayerView({ video, onBack, onSelectRelated }: YouTubePla
         - The left 2 columns are video (top 2 rows) and comments (bottom row)
         - The right 1 column is suggested videos (all 3 rows)
       */}
-            <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 flex-col lg:flex-row max-w-[1600px] mx-auto w-full p-6 gap-8">
 
                 {/* Left Side (Video + Comments) */}
-                <div className="flex h-full flex-[3] flex-col relative w-full">
+                <div className="flex flex-[2.5] flex-col relative w-full gap-8">
                     {/* Video Container */}
-                    <div className={`flex-[3] relative flex items-center justify-center p-4 transition-all duration-[1200ms] ease-[cubic-bezier(0.16,1,0.3,1)] z-20 ${blurPeripheral ? 'scale-[1.12] translate-y-6' : 'scale-100'}`}>
-                        <div id="video-wrapper" className="bg-black w-full h-full rounded-[24px] overflow-hidden shadow-2xl ring-1 ring-white/10 relative group transition-all duration-1000">
+                    <div className={`relative flex items-center justify-center transition-all duration-[1200ms] ease-[cubic-bezier(0.16,1,0.3,1)] z-20 ${blurPeripheral ? 'scale-[1.05] translate-y-3' : 'scale-100'}`}>
+                        <div id="video-wrapper" className="bg-black w-full aspect-video rounded-[24px] overflow-hidden shadow-2xl ring-1 ring-white/10 relative group transition-all duration-1000">
                             {/* Blocker for YouTube top bar (title/share buttons) */}
                             <div className="absolute top-0 left-0 right-0 h-16 z-20 pointer-events-auto cursor-default" />
 
@@ -174,7 +174,7 @@ export function YouTubePlayerView({ video, onBack, onSelectRelated }: YouTubePla
                     </div>
 
                     {/* Comments Section */}
-                    <div className={`flex-1 overflow-y-auto custom-scrollbar px-8 transition-all duration-700 pb-8 z-10 ${blurPeripheral ? 'blur-sm opacity-40 pointer-events-none' : 'blur-none opacity-100'}`}>
+                    <div id="comments-wrapper" className={`flex-1 transition-all duration-700 pb-8 z-10 ${blurPeripheral ? 'blur-sm opacity-40 pointer-events-none' : 'blur-none opacity-100'}`}>
                         <h2 className="text-xl font-semibold mb-4 text-white">Comments</h2>
                         <div className="flex flex-col gap-4">
                             {comments.map((c) => (
@@ -195,7 +195,8 @@ export function YouTubePlayerView({ video, onBack, onSelectRelated }: YouTubePla
                 </div>
 
                 {/* Right Side (Suggested / Peripheral) */}
-                <div className={`flex-[1] flex h-full flex-col overflow-y-auto custom-scrollbar border-l border-white/10 bg-[#070e1a]/50 p-4 transition-all duration-700 z-10 ${blurPeripheral ? 'blur-sm opacity-40 pointer-events-none' : 'blur-none opacity-100'}`}>
+                <div id="suggested-wrapper" className={`flex-[1] flex flex-col bg-[#070e1a]/50 rounded-2xl p-4 transition-all duration-700 z-10 ${blurPeripheral ? 'blur-sm opacity-40 pointer-events-none' : 'blur-none opacity-100'}`}>
+
                     <h2 className="text-lg font-semibold mb-4 text-white">Suggested</h2>
                     <div className="flex flex-col gap-4">
                         {related.map(rv => (
