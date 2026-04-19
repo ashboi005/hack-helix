@@ -28,7 +28,7 @@ import {
   uploadPdfToPresignedUrl,
 } from "@/lib/attention/api"
 import { detectAttentionMode } from "@/lib/attention/detector"
-import { buildRegionScreenshots, canvasToBase64, cropRegionAtPointBase64 } from "@/lib/attention/screenshots"
+import { buildErraticJumpScreenshots, buildRegionScreenshots, canvasToBase64, cropRegionAtPointBase64 } from "@/lib/attention/screenshots"
 import { appendCoordinateSample, getLastSeconds, readCoordinateWindow, writeCoordinateWindow } from "@/lib/attention/storage"
 import type { AttentionMode, CoordinateSample, ScrollSample } from "@/lib/attention/types"
 
@@ -96,6 +96,7 @@ export default function PdfPage() {
   const pdfJsRef = useRef<PdfJsRuntime | null>(null)
   const persistAtRef = useRef(0)
   const mockSampleAtRef = useRef(0)
+  const detectionTickRef = useRef<() => void>(() => {})
 
   const isAuthenticated = Boolean(authSession?.user?.id)
 
@@ -135,15 +136,17 @@ export default function PdfPage() {
     void renderPage(currentPage)
   }, [currentPage, renderScale, pdfLoaded])
 
+  // Keep the detection callback fresh on every render so the timer
+  // always reads the latest state without needing coordinates/scrollSamples
+  // in the timer effect's dependency array (which caused the stale-closure bug
+  // where the interval was torn down and recreated on every mouse-move).
   useEffect(() => {
-    if (!isAuthenticated) return
-
-    const timer = window.setInterval(() => {
-      const recentCoordinates = getLastSeconds(coordinates, 20)
+    detectionTickRef.current = () => {
+      const recentCoordinates = getLastSeconds(coordinates, 10)
       const result = detectAttentionMode(recentCoordinates, scrollSamples)
       setMode(result.mode)
       setModeReason(
-        `ltr ${result.metrics.leftToRightRatio.toFixed(2)} | rtl ${result.metrics.rightToLeftRatio.toFixed(2)} | erratic ${result.metrics.erraticRatio.toFixed(2)}`,
+        `fwd ${result.metrics.leftToRightRatio.toFixed(2)} | reread ${result.metrics.rightToLeftRatio.toFixed(2)} | jumps ${result.metrics.erraticRatio.toFixed(2)}`,
       )
 
       if (result.mode === "scanning" && result.metrics.scrollVelocity > 2.8) {
@@ -157,20 +160,18 @@ export default function PdfPage() {
       if (result.mode === "distraction") {
         void maybeCheckDistraction()
       }
-    }, 1600)
+    }
+  })
 
+  // Stable timer — only depends on isAuthenticated, never torn down by
+  // coordinate changes.  Calls through the ref so it always runs the
+  // latest closure.
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const timer = window.setInterval(() => detectionTickRef.current(), 400)
     return () => window.clearInterval(timer)
-  }, [
-    coordinates,
-    currentPage,
-    isAuthenticated,
-    scrollSamples,
-    lastSummaryAt,
-    lastExplainAt,
-    lastDistractionAt,
-    activeDocId,
-    lastPoint,
-  ])
+  }, [isAuthenticated])
 
   useEffect(() => {
     const onEyeSample = (event: Event) => {
@@ -197,22 +198,12 @@ export default function PdfPage() {
     return () => window.removeEventListener("focuslayer-eye-sample", onEyeSample as EventListener)
   }, [currentPage, isAuthenticated, mockEyeTrackerEnabled])
 
-  const currentLineIndex = useMemo(() => {
+  // Cursor Y as a percentage of the canvas height (0-100), used for the spotlight overlay
+  const cursorYPercent = useMemo(() => {
     const canvas = canvasRef.current
-    if (!canvas || !lastPoint) return 0
-
-    const lineHeight = 28
-    const total = Math.max(8, Math.floor(canvas.height / lineHeight))
-    const index = Math.floor((lastPoint.y / Math.max(1, canvas.height)) * total)
-    return Math.max(0, Math.min(total - 1, index))
+    if (!canvas || !lastPoint) return 50
+    return Math.max(0, Math.min(100, (lastPoint.y / Math.max(1, canvas.height)) * 100))
   }, [lastPoint])
-
-  const lineRows = useMemo(() => {
-    const canvas = canvasRef.current
-    const lineHeight = 28
-    const total = Math.max(8, Math.floor((canvas?.height ?? 920) / lineHeight))
-    return Array.from({ length: total }, (_, index) => index)
-  }, [pdfLoaded, currentPage])
 
   const onFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -350,20 +341,45 @@ export default function PdfPage() {
   }
 
   async function maybeCheckDistraction() {
-    if (!isAuthenticated || !activeDocId || !canvasRef.current) return
+    if (!isAuthenticated || !activeDocId || !canvasRef.current) {
+      console.warn("[distraction] skipped: auth=%s docId=%s canvas=%s", isAuthenticated, activeDocId, !!canvasRef.current)
+      return
+    }
 
     const now = Date.now()
-    if (now - lastDistractionAt < 75_000) return
+    if (now - lastDistractionAt < 20_000) {
+      console.log("[distraction] cooldown active, %ds remaining", ((20_000 - (now - lastDistractionAt)) / 1000).toFixed(1))
+      return
+    }
 
     const last15 = getLastSeconds(coordinates, 15)
-    if (last15.length < 20) return
+    if (last15.length < 8) {
+      console.log("[distraction] not enough samples: %d (need 8)", last15.length)
+      return
+    }
 
     try {
       setLastDistractionAt(now)
 
+      // Full page screenshot
       const fullPageBase64 = canvasToBase64(canvasRef.current)
-      const regions = mapRegionPayload(buildRegionScreenshots(canvasRef.current, coordinates, currentPage, 5))
-      if (regions.length < 2) return
+
+      // Capture erratic jump screenshots (from + to for each big jump)
+      const erraticRegions = buildErraticJumpScreenshots(canvasRef.current, last15, currentPage, 2)
+      console.log("[distraction] erratic regions: %d", erraticRegions.length)
+
+      // Fall back to generic deflection clusters if no big jumps found
+      const regions = mapRegionPayload(
+        erraticRegions.length >= 2
+          ? erraticRegions
+          : buildRegionScreenshots(canvasRef.current, coordinates, currentPage, 5),
+      )
+      if (regions.length < 2) {
+        console.log("[distraction] not enough regions: %d (need 2)", regions.length)
+        return
+      }
+
+      console.log("[distraction] firing backend check with %d regions", regions.length)
 
       const response = await checkDistraction({
         docId: activeDocId,
@@ -380,9 +396,11 @@ export default function PdfPage() {
         })),
       })
 
+      console.log("[distraction] backend response: genuine=%s reason=%s", response.genuine, response.reason)
       setDistractionText(`${response.genuine ? "Genuine pattern" : "Likely distraction"}: ${response.reason}`)
       setStatus("Distraction check completed")
     } catch (err) {
+      console.error("[distraction] backend error:", err)
       setError(err instanceof Error ? err.message : "Failed distraction check")
     }
   }
@@ -645,27 +663,48 @@ export default function PdfPage() {
                 <div className="relative mx-auto w-fit">
                   <canvas ref={canvasRef} className="block max-w-full rounded-md bg-white" />
 
-                  {pdfLoaded && (
-                    <div className="pointer-events-none absolute inset-0 rounded-md">
-                      {lineRows.map((row) => {
-                        const topPercent = (row / lineRows.length) * 100
-                        const heightPercent = 100 / lineRows.length
-                        const shouldFade = row > currentLineIndex
+                  {pdfLoaded && lastPoint && (() => {
+                    // Spotlight band: 3% of canvas height centered on cursor
+                    const bandHalf = 1.5
+                    const aboveEnd = Math.max(0, cursorYPercent - bandHalf)
+                    const belowStart = Math.min(100, cursorYPercent + bandHalf)
 
-                        return (
+                    return (
+                      <div className="pointer-events-none absolute inset-0 rounded-md">
+                        {/* Already-read zone (above cursor) */}
+                        {aboveEnd > 0 && (
                           <div
-                            key={row}
+                            className="absolute inset-x-0 top-0"
                             style={{
-                              top: `${topPercent}%`,
-                              height: `${heightPercent}%`,
-                              background: shouldFade ? "rgba(120, 126, 140, 0.2)" : "transparent",
+                              height: `${aboveEnd}%`,
+                              background: "rgba(0, 0, 0, 0.45)",
+                              transition: "height 0.12s linear",
                             }}
-                            className={`absolute inset-x-0 ${row === currentLineIndex ? "ring-1 ring-cyan-300/55" : ""}`}
                           />
-                        )
-                      })}
-                    </div>
-                  )}
+                        )}
+                        {/* Current reading band — transparent with highlight border */}
+                        <div
+                          className="absolute inset-x-0 ring-1 ring-cyan-300/55"
+                          style={{
+                            top: `${aboveEnd}%`,
+                            height: `${belowStart - aboveEnd}%`,
+                            transition: "top 0.12s linear, height 0.12s linear",
+                          }}
+                        />
+                        {/* Not-yet-read zone (below cursor) */}
+                        {belowStart < 100 && (
+                          <div
+                            className="absolute inset-x-0 bottom-0"
+                            style={{
+                              height: `${100 - belowStart}%`,
+                              background: "rgba(0, 0, 0, 0.25)",
+                              transition: "height 0.12s linear",
+                            }}
+                          />
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {lastPoint && pdfLoaded && (
                     <span
