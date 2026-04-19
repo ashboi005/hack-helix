@@ -300,7 +300,13 @@ function normalizePageNumbers(pageNumbers: number[]): number[] {
 }
 
 function buildUrl(path: string): string {
-  return new URL(path, `${backendBaseUrl}/`).toString()
+  if (/^https?:\/\//i.test(backendBaseUrl)) {
+    return new URL(path, `${backendBaseUrl}/`).toString()
+  }
+
+  const base = backendBaseUrl.replace(/\/+$/g, "")
+  const suffix = path.startsWith("/") ? path : `/${path}`
+  return `${base}${suffix}`
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

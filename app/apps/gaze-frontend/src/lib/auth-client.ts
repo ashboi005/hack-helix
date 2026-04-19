@@ -1,9 +1,8 @@
 import { createAuthClient } from "better-auth/react"
 
-const backendUrl = process.env.NEXT_PUBLIC_APP_BACKEND_URL || "http://localhost:3000"
-
 export const authClient = createAuthClient({
-    baseURL: backendUrl,
+    // Use same-origin requests and proxy /api/auth from Next to backend.
+    baseURL: "",
     fetchOptions: {
         credentials: "include",
     },

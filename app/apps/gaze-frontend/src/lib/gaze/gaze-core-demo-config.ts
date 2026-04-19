@@ -1,8 +1,8 @@
-const DEFAULT_APP_BACKEND_BASE_URL = "http://localhost:3000"
+const DEFAULT_APP_BACKEND_BASE_URL = "/api/backend"
 const DEFAULT_GAZE_CORE_BACKEND_BASE_URL = "http://localhost:3001"
 
 export function getGazeCoreDemoConfig() {
-  const appBackendBaseUrl = process.env.NEXT_PUBLIC_APP_BACKEND_URL ?? DEFAULT_APP_BACKEND_BASE_URL
+  const appBackendBaseUrl = DEFAULT_APP_BACKEND_BASE_URL
 
   return {
     appBackendBaseUrl,
