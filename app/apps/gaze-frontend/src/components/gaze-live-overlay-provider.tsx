@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useGazeCoreSetupWidget, type GazeCoreWidgetOptions, type LivePreviewPoint } from "@/hooks/use-gaze-core-setup"
 import { getGazeCoreDemoConfig } from "@/lib/gaze/gaze-core-demo-config"
 
@@ -67,6 +67,7 @@ function LiveOverlayControls({ state }: { state: ReturnType<typeof useGazeCoreSe
 
 export function GazeLiveOverlayProvider({ children }: { children: ReactNode }) {
   const demoConfig = getGazeCoreDemoConfig()
+  const [mounted, setMounted] = useState(false)
   const [widgetOptions, setWidgetOptions] = useState<GazeCoreWidgetOptions>({
     backendBaseUrl: demoConfig.appBackendBaseUrl,
     apiKey: demoConfig.apiKey,
@@ -75,6 +76,10 @@ export function GazeLiveOverlayProvider({ children }: { children: ReactNode }) {
     livePreviewToken: demoConfig.livePreviewToken,
   })
   const [pointHistory, setPointHistory] = useState<LivePreviewPoint[]>([])
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const configureWidget = useCallback((nextOptions: GazeCoreWidgetOptions) => {
     setWidgetOptions((current) => ({ ...current, ...nextOptions }))
@@ -104,8 +109,12 @@ export function GazeLiveOverlayProvider({ children }: { children: ReactNode }) {
   return (
     <GazeLiveOverlayContext.Provider value={value}>
       {children}
-      <RootLiveOverlay point={latestPoint} active={state.livePreviewActive} />
-      <LiveOverlayControls state={state} />
+      {mounted && (
+        <>
+          <RootLiveOverlay point={latestPoint} active={state.livePreviewActive} />
+          <LiveOverlayControls state={state} />
+        </>
+      )}
     </GazeLiveOverlayContext.Provider>
   )
 }
