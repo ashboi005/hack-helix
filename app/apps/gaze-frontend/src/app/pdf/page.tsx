@@ -359,8 +359,6 @@ export default function PdfPage() {
     }
 
     try {
-      setLastDistractionAt(now)
-
       // Full page screenshot
       const fullPageBase64 = canvasToBase64(canvasRef.current)
 
@@ -399,6 +397,7 @@ export default function PdfPage() {
       console.log("[distraction] backend response: genuine=%s reason=%s", response.genuine, response.reason)
       setDistractionText(`${response.genuine ? "Genuine pattern" : "Likely distraction"}: ${response.reason}`)
       setStatus("Distraction check completed")
+      setLastDistractionAt(now)
     } catch (err) {
       console.error("[distraction] backend error:", err)
       setError(err instanceof Error ? err.message : "Failed distraction check")

@@ -28,8 +28,10 @@ export type ExplainRereadResponse = { explanation: string }
 type CheckDistractionBackendBody = {
   docId: string
   fullPageBase64: string
-  regionImages: string[]
+  fullPagePageNumber: number
+  regionImages: RegionImagePayload[]
   pageNumbers: number[]
+  recentCoordinates?: CheckDistractionRequest["recentCoordinates"]
 }
 
 export type CheckDistractionResponse = {
@@ -215,22 +217,48 @@ export function mapRegionPayload(images: RegionImagePayload[]): RegionImagePaylo
 }
 
 function buildCheckDistractionBody(input: CheckDistractionRequest): CheckDistractionBackendBody {
-  const pageNumbers = normalizePageNumbers([input.fullPagePageNumber, ...input.pageNumbers])
+  const fullPagePageNumber = normalizePageNumbers([input.fullPagePageNumber])[0]
+  if (!fullPagePageNumber) {
+    throw new Error("A valid fullPagePageNumber is required for distraction check")
+  }
+
+  const pageNumbers = normalizePageNumbers([fullPagePageNumber, ...input.pageNumbers])
 
   const regionImages = input.regionImages
-    .map((region) => region.imageBase64)
-    .filter((image) => image.trim().length > 0)
+    .map((region) => ({
+      imageBase64: region.imageBase64.trim(),
+      pageNumber: normalizePageNumbers([region.pageNumber])[0] ?? fullPagePageNumber,
+    }))
+    .filter((region) => region.imageBase64.length > 0)
     .slice(0, 4)
 
   if (regionImages.length < 2) {
     throw new Error("At least 2 region images are required for distraction check")
   }
 
+  const recentCoordinates = input.recentCoordinates
+    .filter((sample) => Number.isFinite(sample.x) && Number.isFinite(sample.y))
+    .map((sample) => {
+      const ts = Math.floor(sample.ts)
+      const normalizedPageNumber = normalizePageNumbers([sample.pageNumber ?? 0])[0]
+      return {
+        x: sample.x,
+        y: sample.y,
+        ts,
+        source: sample.source,
+        pageNumber: normalizedPageNumber,
+      }
+    })
+    .filter((sample) => sample.ts > 0)
+    .slice(-2000)
+
   return {
     docId: input.docId,
     fullPageBase64: input.fullPageBase64,
+    fullPagePageNumber,
     regionImages,
-    pageNumbers: pageNumbers.length ? pageNumbers : [input.fullPagePageNumber],
+    pageNumbers: pageNumbers.length ? pageNumbers : [fullPagePageNumber],
+    recentCoordinates: recentCoordinates.length > 0 ? recentCoordinates : undefined,
   }
 }
 

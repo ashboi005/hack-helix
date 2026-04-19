@@ -15,6 +15,10 @@ import type { CoordinateSample, DetectionMetrics, DetectionResult, ScrollSample 
  */
 
 const LINE_HEIGHT_PX = 28
+const Y_JITTER_PX = 20
+const SAME_LINE_BACKTRACK_PX = 12
+const WITHIN_SEGMENT_BACKTRACK_PX = 16
+const SAMPLE_BACKTRACK_PX = 6
 
 // ────────────────────────── Public API ──────────────────────────
 
@@ -68,24 +72,47 @@ export function detectAttentionMode(
   }
 
   // ── Direction oscillation ──
-  // If the cursor keeps bouncing between different lines (up-down-up-down)
-  // that is erratic behavior even when each individual jump is only 1-2 lines.
+  // Ignore tiny Y jitter so slight deflections do not look like distraction.
+  const meaningfulDirections: number[] = []
+  for (let i = 1; i < segments.length; i++) {
+    const prev = segments[i - 1]
+    const curr = segments[i]
+    const dy = curr.yStart - prev.yEnd
+    const lineDelta = curr.lineIndex - prev.lineIndex
+    if (Math.abs(dy) <= Y_JITTER_PX || lineDelta === 0) continue
+    meaningfulDirections.push(Math.sign(lineDelta))
+  }
+
   let directionChanges = 0
-  for (let i = 2; i < segments.length; i++) {
-    const prevDelta = segments[i - 1].lineIndex - segments[i - 2].lineIndex
-    const currDelta = segments[i].lineIndex - segments[i - 1].lineIndex
-    if ((prevDelta > 0 && currDelta < 0) || (prevDelta < 0 && currDelta > 0)) {
+  for (let i = 1; i < meaningfulDirections.length; i++) {
+    if (meaningfulDirections[i] !== meaningfulDirections[i - 1]) {
       directionChanges++
     }
   }
+
   const oscillationRatio =
-    segments.length > 2 ? directionChanges / (segments.length - 2) : 0
+    meaningfulDirections.length >= 4
+      ? directionChanges / (meaningfulDirections.length - 1)
+      : 0
 
   // ── Within-segment X reversals ──
   let withinLineReversals = 0
   for (const seg of segments) {
-    if (seg.xEnd < seg.xStart - 20 && seg.sampleCount > 3) {
+    if (seg.xMax - seg.xEnd > WITHIN_SEGMENT_BACKTRACK_PX && seg.sampleCount > 3) {
       withinLineReversals++
+    }
+  }
+
+  // Count immediate same-line negative X movement from the current point.
+  // This improves reread detection without waiting for long segment resets.
+  let sampleLevelBacktracks = 0
+  for (let i = 1; i < samples.length; i++) {
+    const prev = samples[i - 1]
+    const curr = samples[i]
+    if (prev.pageNumber !== curr.pageNumber) continue
+    if (Math.abs(curr.y - prev.y) > Y_JITTER_PX) continue
+    if (curr.x < prev.x - SAMPLE_BACKTRACK_PX) {
+      sampleLevelBacktracks++
     }
   }
 
@@ -96,8 +123,10 @@ export function detectAttentionMode(
 
   // Rereading — count same-line backtracks, backward transitions and within-line reversals
   // Denominator is just totalTransitions so it's directly comparable to forwardRatio
-  const rereadRatio =
+  const baseRereadRatio =
     (sameLineReread + backward + withinLineReversals) / (totalTransitions + EPS)
+  const sampleBacktrackRatio = sampleLevelBacktracks / (samples.length - 1 + EPS)
+  const rereadRatio = Math.min(1, baseRereadRatio + sampleBacktrackRatio * 0.6)
 
   // Distraction — big jumps + oscillation combined
   const bigJumpRatio = bigJump / (totalTransitions + EPS)
@@ -150,6 +179,9 @@ type LineSegment = {
   pageNumber: number
   xStart: number
   xEnd: number
+  xMax: number
+  yStart: number
+  yEnd: number
   startTs: number
   endTs: number
   sampleCount: number
@@ -169,12 +201,17 @@ function buildLineSegments(samples: CoordinateSample[]): LineSegment[] {
         pageNumber: s.pageNumber,
         xStart: s.x,
         xEnd: s.x,
+        xMax: s.x,
+        yStart: s.y,
+        yEnd: s.y,
         startTs: s.ts,
         endTs: s.ts,
         sampleCount: 1,
       }
     } else {
       curr.xEnd = s.x
+      curr.xMax = Math.max(curr.xMax, s.x)
+      curr.yEnd = s.y
       curr.endTs = s.ts
       curr.sampleCount++
     }
@@ -199,6 +236,8 @@ function mergeShortSegments(segments: LineSegment[]): LineSegment[] {
       seg.pageNumber === prev.pageNumber
     ) {
       prev.xEnd = seg.xEnd
+      prev.xMax = Math.max(prev.xMax, seg.xMax)
+      prev.yEnd = seg.yEnd
       prev.endTs = seg.endTs
       prev.sampleCount += seg.sampleCount
     } else {
@@ -223,13 +262,18 @@ function classifyTransition(prev: LineSegment, curr: LineSegment): TransitionKin
   if (prev.pageNumber !== curr.pageNumber) return "page-change"
 
   const lineDiff = curr.lineIndex - prev.lineIndex
+  const dy = curr.yStart - prev.yEnd
+
+  if (Math.abs(dy) <= Y_JITTER_PX) {
+    return curr.xStart < prev.xEnd - SAME_LINE_BACKTRACK_PX ? "same-line-reread" : "same-line-continue"
+  }
 
   if (lineDiff === 0) {
-    return curr.xStart < prev.xEnd - 15 ? "same-line-reread" : "same-line-continue"
+    return curr.xStart < prev.xEnd - SAME_LINE_BACKTRACK_PX ? "same-line-reread" : "same-line-continue"
   }
 
   // 2+ lines in either direction is a big jump
-  if (Math.abs(lineDiff) >= 2) return "big-jump"
+  if (Math.abs(lineDiff) >= 2 && Math.abs(dy) >= LINE_HEIGHT_PX * 1.4) return "big-jump"
 
   // 1 line down = reading forward
   if (lineDiff > 0) return "forward"
