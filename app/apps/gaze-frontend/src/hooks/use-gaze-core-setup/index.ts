@@ -966,6 +966,17 @@ export function useGazeCoreSetupWidget(options: GazeCoreWidgetOptions = {}) {
           }
 
           await stopCalibration()
+
+          const completedRecord = calibrationRecordRef.current
+          if (
+            previewActive
+            && Boolean(sessionRef.current)
+            && Boolean(completedRecord?.calibration)
+            && Boolean(completedRecord?.gyroZeroSnapshot)
+          ) {
+            void startLivePreview()
+          }
+
           return
         }
 

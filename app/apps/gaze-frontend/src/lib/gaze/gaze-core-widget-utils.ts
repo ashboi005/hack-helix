@@ -2,23 +2,23 @@
 import type { ModeVectorPoint, PreviewGazeData, RoiRect } from "./gaze-core-widget-types"
 
 export function buildCalibrationGrid(screenWidth: number, screenHeight: number): [number, number][] {
+  const pad = 20 // Inset from screen edges so the dot (20×20) stays fully visible
   return [
-    [0, 0],
-    [screenWidth / 2, 0],
-    [screenWidth, 0],
-    [screenWidth, screenHeight / 2],
-    [screenWidth, screenHeight],
-    [screenWidth / 2, screenHeight],
-    [0, screenHeight],
-    [0, screenHeight / 2],
+    [pad, pad],
+    [screenWidth / 2, pad],
+    [screenWidth - pad, pad],
+    [screenWidth - pad, screenHeight / 2],
+    [screenWidth - pad, screenHeight - pad],
+    [screenWidth / 2, screenHeight - pad],
+    [pad, screenHeight - pad],
+    [pad, screenHeight / 2],
     [screenWidth / 2, screenHeight / 2],
   ]
 }
 
-export function getCalibrationTargetTransform(point: [number, number], screenWidth: number, screenHeight: number) {
-  const translateX = point[0] <= 0 ? "0%" : Math.abs(point[0] - screenWidth) <= 0.5 ? "-100%" : "-50%"
-  const translateY = point[1] <= 0 ? "0%" : Math.abs(point[1] - screenHeight) <= 0.5 ? "-100%" : "-50%"
-  return `translate(${translateX}, ${translateY})`
+export function getCalibrationTargetTransform(_point: [number, number], _screenWidth: number, _screenHeight: number) {
+  // With padded grid points, dots are already inset from edges; always center on the point
+  return "translate(-50%, -50%)"
 }
 
 export function clampValue(value: number, minValue: number, maxValue: number): number {

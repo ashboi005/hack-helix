@@ -1,5 +1,5 @@
-import { ProjectHomeHub } from "../components/project-home-hub"
+import { LiveOverviewDashboard } from "@/components/live-overview-dashboard"
 
 export default function Home() {
-  return <ProjectHomeHub />
+  return <LiveOverviewDashboard />
 }

@@ -23,9 +23,9 @@ export function CalibrationOverlay({ state }: { state: GazeCoreWidgetState }) {
       <div
         className="absolute h-5 w-5 rounded-full border-4 border-yellow-400 bg-yellow-300"
         style={{
-          left: state.calibPoint[0],
-          top: state.calibPoint[1],
-          transform: state.calibrationTargetTransform,
+          left: `${(state.calibPoint[0] / state.calibrationViewport.width) * 100}vw`,
+          top: `${(state.calibPoint[1] / state.calibrationViewport.height) * 100}vh`,
+          transform: "translate(-50%, -50%)",
         }}
       />
 

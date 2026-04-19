@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { GazeCoreWidget } from "@/components/gaze-core-widget"
@@ -50,6 +50,7 @@ export default function CalibratePage() {
   const backendBaseUrl = normalizeBaseUrl(initialConfig.appBackendBaseUrl)
 
   const { data: authSession, isPending: authPending } = useSession()
+  const autoForwardedRef = useRef(false)
 
   const [session, setSession] = useState<SetupSession | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -140,6 +141,14 @@ export default function CalibratePage() {
     router.push("/login")
   }
 
+  const handleCalibrationRecordReady = useCallback(() => {
+    if (autoForwardedRef.current) return
+    autoForwardedRef.current = true
+    window.setTimeout(() => {
+      router.push("/")
+    }, 450)
+  }, [router])
+
   if (authPending || !authChecked) {
     return (
       <main className="min-h-screen bg-background px-6 py-10">
@@ -170,6 +179,7 @@ export default function CalibratePage() {
     deviceUuid: session.uuid,
     livePreviewSocketUrl: session.websocketUrl,
     livePreviewToken: session.token,
+    onCalibrationRecordReady: handleCalibrationRecordReady,
   }
 
   return (
@@ -222,7 +232,7 @@ export default function CalibratePage() {
       {session && (
         <div className="fixed bottom-6 right-6 z-50">
           <button
-            onClick={() => router.push("/pdf")}
+            onClick={() => router.push("/")}
             className="rounded-full bg-primary px-6 py-3 text-sm font-medium text-primary-foreground shadow-lg hover:bg-primary/90"
           >
             Calibration Done →

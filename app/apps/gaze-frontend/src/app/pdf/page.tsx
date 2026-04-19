@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation"
 import { Space_Grotesk } from "next/font/google"
 
 import { useSession } from "@/lib/auth-client"
+import { useGazeActionNavigation } from "@/hooks/use-gaze-action-navigation"
 import {
   checkDistraction,
   explainReread,
@@ -62,6 +63,7 @@ type PdfWindow = Window & {
 export default function PdfPage() {
   const router = useRouter()
   const { data: authSession, isPending: authPending } = useSession()
+  const gazeNavigation = useGazeActionNavigation()
 
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
   const [activeDocId, setActiveDocIdState] = useState<string | null>(null)
@@ -484,6 +486,13 @@ export default function PdfPage() {
 
   return (
     <main className={`${spaceGrotesk.className} min-h-screen bg-[#050914] text-zinc-100`}>
+      {gazeNavigation.gazeControlEnabled && gazeNavigation.livePreviewActive && (
+        <span
+          className="pointer-events-none fixed z-50 block h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-cyan-300 bg-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.7)]"
+          style={{ left: gazeNavigation.cursorPosition.x, top: gazeNavigation.cursorPosition.y }}
+        />
+      )}
+
       <section className="mx-auto flex min-h-screen w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
         <header className="rounded-2xl border border-white/10 bg-[#0a1220]/90 p-5 shadow-[0_20px_45px_-35px_rgba(0,0,0,0.95)]">
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-400">PDF Workspace</p>
@@ -704,6 +713,13 @@ export default function PdfPage() {
           </section>
         </div>
       </section>
+
+      {gazeNavigation.gazeControlEnabled && (
+        <div className="pointer-events-none fixed left-4 top-4 z-40 rounded bg-black/70 px-3 py-2 text-sm text-white">
+          <p>Live preview</p>
+          <p className="text-xs text-white/70">Status: {gazeNavigation.livePreviewStatus}</p>
+        </div>
+      )}
     </main>
   )
 }

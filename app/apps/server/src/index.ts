@@ -2,7 +2,7 @@ import { authRoutes } from "@/modules/auth/auth.routes";
 import { authHandlerPlugin } from "@/modules/auth/auth.service";
 import { assistanceRoutes } from "@/modules/assistance/assistance.routes";
 import { documentRoutes } from "@/modules/documents/documents.routes";
-import { eyeRoutes } from "@/modules/eye/eye.routes";
+import { eyeRoutes, gazeRoutes } from "@/modules/eye/eye.routes";
 import { tasksRoutes } from "@/modules/tasks/tasks.routes";
 import { isApiError } from "@/utils/api-error";
 import { env } from "@/utils/env";
@@ -50,6 +50,7 @@ const app = new Elysia({ name: "focuslayer.api" })
   .use(assistanceRoutes)
   .use(tasksRoutes)
   .use(eyeRoutes)
+  .use(gazeRoutes)
   .get("/", () => ({
     name: "FocusLayer API",
     status: "ok",
