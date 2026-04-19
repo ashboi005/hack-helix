@@ -330,15 +330,28 @@ function normalizeBaseUrl(baseUrl: string): string {
 }
 
 async function parseJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
-  const payload = await response.json().catch(() => null)
+  const rawBody = await response.text().catch(() => "")
+
+  let payload: unknown = null
+  if (rawBody.trim()) {
+    try {
+      payload = JSON.parse(rawBody)
+    } catch {
+      payload = null
+    }
+  }
 
   if (!response.ok) {
-    const message = extractErrorMessage(payload, fallbackMessage)
+    const message = extractErrorMessage(payload, fallbackMessage, rawBody)
     throw new Error(message)
   }
 
   if (payload === null) {
-    throw new Error(`${fallbackMessage}: empty response body`)
+    if (!rawBody.trim()) {
+      throw new Error(`${fallbackMessage}: empty response body`)
+    }
+
+    throw new Error(`${fallbackMessage}: invalid JSON response`)
   }
 
   return payload as T
@@ -366,7 +379,7 @@ function extractStringField(payload: unknown, keys: string[]): string | null {
   return null
 }
 
-function extractErrorMessage(payload: unknown, fallbackMessage: string): string {
+function extractErrorMessage(payload: unknown, fallbackMessage: string, rawBody?: string): string {
   if (!payload || typeof payload !== "object") return fallbackMessage
 
   const error = Reflect.get(payload, "error")
@@ -377,6 +390,10 @@ function extractErrorMessage(payload: unknown, fallbackMessage: string): string 
 
   const code = Reflect.get(payload, "code")
   if (typeof code === "string" && code.trim()) return code
+
+  if (rawBody?.trim()) {
+    return rawBody.slice(0, 200)
+  }
 
   return fallbackMessage
 }

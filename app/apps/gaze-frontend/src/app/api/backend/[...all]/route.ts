@@ -22,6 +22,15 @@ function buildUpstreamUrl(request: NextRequest, pathSegments: string[]): string 
   return `${backendBaseUrl}/${pathname}${search}`
 }
 
+function cloneForwardHeaders(source: Headers): Headers {
+  const headers = new Headers(source)
+  // These may become stale after body transformations.
+  headers.delete("content-length")
+  headers.delete("transfer-encoding")
+  headers.delete("content-encoding")
+  return headers
+}
+
 async function proxyBackendRequest(request: NextRequest, pathSegments: string[]): Promise<Response> {
   const url = buildUpstreamUrl(request, pathSegments)
   const headers = new Headers(request.headers)
@@ -87,10 +96,54 @@ async function proxyBackendRequest(request: NextRequest, pathSegments: string[])
     )
   }
 
+  if (contentType.includes("application/json")) {
+    const rawJson = await upstreamResponse.text()
+
+    if (!rawJson.trim()) {
+      return Response.json(
+        {
+          error: "upstream_empty_json",
+          code: "UPSTREAM_EMPTY_JSON",
+          details: {
+            backendUrl: url,
+            status: upstreamResponse.status,
+          },
+        },
+        { status: 502 },
+      )
+    }
+
+    try {
+      JSON.parse(rawJson)
+    } catch {
+      return Response.json(
+        {
+          error: "upstream_invalid_json",
+          code: "UPSTREAM_INVALID_JSON",
+          details: {
+            backendUrl: url,
+            status: upstreamResponse.status,
+            upstreamSnippet: rawJson.slice(0, 500),
+          },
+        },
+        { status: 502 },
+      )
+    }
+
+    const headersForClient = cloneForwardHeaders(upstreamResponse.headers)
+    headersForClient.set("content-type", "application/json; charset=utf-8")
+
+    return new Response(rawJson, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: headersForClient,
+    })
+  }
+
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,
-    headers: upstreamResponse.headers,
+    headers: cloneForwardHeaders(upstreamResponse.headers),
   })
 }
 
