@@ -57,9 +57,9 @@ export function ProjectHomeHub() {
       ? {
         title: "Account",
         subtitle: "Authenticated",
-        description: "You are signed in. Open your dashboard to continue.",
-        href: "/dashboard",
-        actionLabel: "Open Dashboard",
+        description: "You are signed in. Open your PDF workspace to continue.",
+        href: "/pdf",
+        actionLabel: "Open PDF Workspace",
         accent: "from-emerald-300/35 to-lime-500/20",
       }
       : {

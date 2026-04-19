@@ -19,10 +19,10 @@ export default function ApplianceControlPage() {
 
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
-              href="/dashboard"
+              href="/pdf"
               className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-100 transition-colors hover:bg-white/20"
             >
-              Back To Dashboard
+              Back To PDF
             </Link>
             <Link
               href="/"
